@@ -1,0 +1,10 @@
+{
+  "description": "Streamline your invoicing process with an intuitive system that generates customer and accountant PDF copies, tracks completion, and offers analytical insights.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

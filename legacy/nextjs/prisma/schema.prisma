@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// Singleton row (id = 1) holding company details, bank details and form defaults.
+model Setting {
+  id                       Int      @id @default(1)
+  companyName              String   @default("DINAMIK SHIPPING PTE LTD")
+  addressLine              String   @default("138 Cecil Street #09-03, Cecil Court, Singapore 069538   Tel: (65) 6222 2811  Fax: (65) 6222 2155")
+  registrationNo           String   @default("Company Registration No. 200403109N")
+  paymentLine1             String   @default("Payment to be made to DINAMIK SHIPPING PTE LTD by Telegraphic Transfer to our account")
+  paymentLine2             String   @default("No. 651-869620-001 with OCBC Bank (Singapore), MBFC Branch, Swift Code: OCBCSGSG")
+  signatoryName            String   @default("Deanna Lim")
+  signatoryTitle           String   @default("General Manager")
+  coverLetterIntro         String   @default("We enclose the following Debit notes and will appreciate your early settlement.")
+  defaultPackingDesc       String   @default("Metal Boxes (MB5)")
+  defaultProductDesc       String   @default("SMR 20 Rubber")
+  defaultBoxesPerContainer Decimal  @default(16) @db.Decimal(10, 4)
+  defaultMtPerContainer    Decimal  @default(20.16) @db.Decimal(10, 4)
+  defaultChargeDesc        String   @default("Transhipment Charge")
+  defaultRatePerMt         Decimal  @default(54) @db.Decimal(10, 2)
+  updatedAt                DateTime @updatedAt
+}
+
+/// Bill-to party printed at the top of the debit note.
+model Customer {
+  id           Int         @id @default(autoincrement())
+  name         String
+  addressLine1 String      @default("")
+  addressLine2 String      @default("")
+  addressLine3 String      @default("")
+  addressLine4 String      @default("")
+  addressLine5 String      @default("")
+  attention    String      @default("")
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  debitNotes   DebitNote[]
+
+  @@index([name])
+}
+
+/// Consignee / buyer of the rubber (e.g. Bridgestone Singapore Pte Ltd).
+model Buyer {
+  id         Int         @id @default(autoincrement())
+  name       String      @unique
+  createdAt  DateTime    @default(now())
+  debitNotes DebitNote[]
+}
+
+enum CostCategory {
+  PORT
+  TRANSPORT
+  MISC
+}
+
+/// How a cost line amount is computed from its rate.
+enum CostBasis {
+  PER_CONTAINER
+  PER_BOX
+  PER_MT
+  FLAT
+}
+
+/// Editable rate card. Copied onto every new debit note; each note keeps its own copy.
+model CostRateDefault {
+  id        Int          @id @default(autoincrement())
+  category  CostCategory
+  code      String
+  label     String       @default("")
+  basis     CostBasis    @default(PER_CONTAINER)
+  rate      Decimal      @default(0) @db.Decimal(12, 4)
+  sortOrder Int          @default(0)
+  active    Boolean      @default(true)
+
+  @@unique([category, code])
+}
+
+model DebitNote {
+  id                 Int       @id @default(autoincrement())
+  dnNumber           String    @unique
+  yearMonth          String    @db.VarChar(6)
+  runningNo          Int
+  dnDate             DateTime  @db.Date
+  customerId         Int
+  customer           Customer  @relation(fields: [customerId], references: [id])
+  customerInvoiceRef String    @default("")
+  buyerId            Int?
+  buyer              Buyer?    @relation(fields: [buyerId], references: [id])
+  contractNo         String    @default("")
+
+  // Cargo
+  boxes             Decimal   @db.Decimal(12, 2)
+  packingDesc       String
+  boxesPerContainer Decimal   @db.Decimal(10, 4)
+  mtPerContainer    Decimal   @db.Decimal(10, 4)
+  containers        Decimal   @db.Decimal(12, 4)
+  tonnage           Decimal   @db.Decimal(12, 3)
+  productDesc       String
+
+  // Feeder leg
+  feederVessel      String    @default("")
+  feederVoyage      String    @default("")
+  feederArrivalDate DateTime? @db.Date
+  blNumber          String    @default("")
+  blRef             String    @default("")
+
+  // Ocean leg
+  oceanVessel       String    @default("")
+  oceanVoyage       String    @default("")
+  destination       String    @default("")
+  blDate            DateTime? @db.Date
+
+  // Charge (single transhipment charge line, SGD)
+  chargeDesc        String    @default("Transhipment Charge")
+  ratePerMt         Decimal   @db.Decimal(10, 2)
+  chargeAmount      Decimal   @db.Decimal(12, 2)
+  totalAmount       Decimal   @db.Decimal(12, 2)
+  amountInWords     String    @db.VarChar(500)
+
+  // Internal costing (accounts copy only)
+  totalCost         Decimal   @default(0) @db.Decimal(12, 2)
+  profit            Decimal   @default(0) @db.Decimal(12, 2)
+  costs             DebitNoteCost[]
+
+  remarks           String    @default("") @db.VarChar(1000)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([yearMonth])
+  @@index([dnDate])
+  @@index([customerId])
+  @@index([buyerId])
+  @@index([destination])
+}
+
+model DebitNoteCost {
+  id          Int          @id @default(autoincrement())
+  debitNoteId Int
+  debitNote   DebitNote    @relation(fields: [debitNoteId], references: [id], onDelete: Cascade)
+  category    CostCategory
+  code        String
+  label       String       @default("")
+  basis       CostBasis
+  rate        Decimal      @db.Decimal(12, 4)
+  amount      Decimal      @db.Decimal(12, 2)
+  sortOrder   Int          @default(0)
+
+  @@index([debitNoteId])
+}

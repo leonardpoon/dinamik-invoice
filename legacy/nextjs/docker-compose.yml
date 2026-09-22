@@ -1,0 +1,23 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: dinamik-invoice-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: dinamik_invoice
+      MYSQL_USER: dinamik
+      MYSQL_PASSWORD: dinamik
+    ports:
+      - "3307:3306"
+    volumes:
+      - dinamik_mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  dinamik_mysql_data:

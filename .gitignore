@@ -1,0 +1,25 @@
+# dependencies
+/node_modules
+
+# build output
+/dist
+/src-tauri/target
+/src-tauri/gen/schemas
+
+# the sample UI this app's look was taken from; kept locally for reference
+/Sample UI/node_modules
+
+# the previous Next.js app, kept until the Tauri version has been in use a while
+/legacy/nextjs/node_modules
+/legacy/nextjs/.next
+
+# left over from the Next.js + portable MySQL setup
+/runtime
+/data
+/backups
+
+# misc
+.DS_Store
+*.tsbuildinfo
+.env*
+~$*

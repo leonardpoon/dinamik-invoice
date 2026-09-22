@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-fraunces);
+  --font-mono: var(--font-jetbrains);
+}
+
+:root {
+  --background: #0d0f14;
+  --foreground: #e8e6e0;
+  --card: #13161e;
+  --card-foreground: #e8e6e0;
+  --primary: #c9a84c;
+  --primary-foreground: #0d0f14;
+  --secondary: #1a1d27;
+  --secondary-foreground: #a8a49c;
+  --muted: #1a1d27;
+  --muted-foreground: #6b6760;
+  --accent: #c9a84c;
+  --accent-foreground: #0d0f14;
+  --border: #252830;
+  --ring: #c9a84c;
+  --radius: 4px;
+  --font-inter: 'Inter', sans-serif;
+  --font-fraunces: 'Fraunces', serif;
+  --font-jetbrains: 'JetBrains Mono', monospace;
+}
+
+:root.light {
+  --background: #f5f3ef;
+  --foreground: #1a1814;
+  --card: #ffffff;
+  --card-foreground: #1a1814;
+  --primary: #a07828;
+  --primary-foreground: #ffffff;
+  --secondary: #ede9e2;
+  --secondary-foreground: #4a4640;
+  --muted: #ede9e2;
+  --muted-foreground: #8a837a;
+  --accent: #a07828;
+  --accent-foreground: #ffffff;
+  --border: #ddd8d0;
+  --ring: #a07828;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+input, select, textarea {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  font-family: var(--font-inter);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+  font-size: 13px;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--muted-foreground);
+}
+
+select option {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.font-serif { font-family: var(--font-fraunces); }
+.font-mono { font-family: var(--font-jetbrains); }
+
+/* Tabular figures everywhere money or tonnage is shown, so columns line up. */
+.font-mono, input[type='number'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The webview has no visible scrollbar gutter by default on Windows. */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Native date pickers render their indicator dark-on-dark in the webview. */
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='month']::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
+}
+
+:root.light input[type='date']::-webkit-calendar-picker-indicator,
+:root.light input[type='month']::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
+/* Nothing in a desktop app should be selectable-draggable like a web page. */
+button { cursor: pointer; }
