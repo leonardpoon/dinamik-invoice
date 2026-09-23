@@ -1,0 +1,51 @@
+name: Release
+
+# Push a tag like v0.3.0 (after bumping "version" in src-tauri/tauri.conf.json
+# to match) to build the signed NSIS installer and publish it, plus the
+# updater's latest.json, to a GitHub Release. The running app's updater
+# endpoint always points at the latest release, so this is the one action
+# that ships an update to every install.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: cargo test --verbose
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - working-directory: .
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Dinamik Invoice ${{ github.ref_name }}'
+          releaseBody: 'Update via the app, or download the installer below.'
+          releaseDraft: false
+          prerelease: false

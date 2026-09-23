@@ -1,6 +1,6 @@
 //! Fills a database with a few months of realistic notes so the screens can be
 //! looked at with data in them:  cargo run --example seed_demo -- <db path>
-use dinamik_invoice_lib::{db::Db, models::*};
+use dinamik_invoice_lib::{calc::ShipmentType, db::Db, models::*};
 
 fn main() {
     let path = std::env::args().nth(1).expect("usage: seed_demo <db path>");
@@ -36,6 +36,7 @@ fn main() {
             boxes_per_container: 16.0,
             mt_per_container: 20.16,
             product_desc: "SMR 20 Rubber".into(),
+            shipment_type: ShipmentType::Container,
             feeder_vessel: (*feeder).into(),
             feeder_voyage: format!("26{:02}W", 10 + i),
             feeder_arrival_date: (*date).into(),
@@ -66,6 +67,9 @@ fn main() {
             boxes_per_container: 16.0,
             mt_per_container: 20.16,
             contract_no: String::new(),
+            boxes: *boxes as f64,
+            ocean_vessel: (*ocean).into(),
+            ocean_voyage: format!("{}E", 10 + i),
         })
         .unwrap();
         if i < 5 {

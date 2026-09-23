@@ -1,7 +1,7 @@
 //! Writes the three documents from the sample workbook's data into a directory,
 //! so the layout can be eyeballed without launching the app:
 //!   cargo run --example sample_pdfs -- <out-dir>
-use dinamik_invoice_lib::{db::Db, models::*, pdf};
+use dinamik_invoice_lib::{calc::ShipmentType, db::Db, models::*, pdf};
 
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
@@ -26,6 +26,7 @@ fn main() {
         boxes_per_container: 16.0,
         mt_per_container: 20.16,
         product_desc: "SMR 20 Rubber".into(),
+        shipment_type: ShipmentType::Container,
         feeder_vessel: "Jade Star".into(),
         feeder_voyage: "2610W".into(),
         feeder_arrival_date: "2026-09-22".into(),
@@ -48,6 +49,15 @@ fn main() {
     }
     db.set_filed(id, true).unwrap();
 
+    // A handful of the prior month too, so the cover letter below has more
+    // than one month to group into columns.
+    let mut prior = input.clone();
+    prior.year_month = "202608".into();
+    prior.dn_date = "2026-08-25".into();
+    for _ in 0..3 {
+        db.create_debit_note(&prior).unwrap();
+    }
+
     let settings = db.settings().unwrap();
     let note = db.debit_note(id).unwrap();
 
@@ -64,8 +74,9 @@ fn main() {
             settings: &settings,
             letter_date: "2026-09-30",
             attn_name: "Ms Chia Ching Lian",
-            year_month: "202609",
-            dn_numbers: db.dn_numbers_for(cid, &["202609".to_string()]).unwrap(),
+            dn_numbers: db
+                .dn_numbers_for(cid, &["202608".to_string(), "202609".to_string()])
+                .unwrap(),
         }),
     )
     .unwrap();

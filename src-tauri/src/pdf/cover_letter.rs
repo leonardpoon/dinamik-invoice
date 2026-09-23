@@ -54,8 +54,9 @@ pub struct CoverLetter<'a> {
     /// The addressee's contact name — its own field because a cover letter's
     /// contact often isn't the customer record's default `attention`.
     pub attn_name: &'a str,
-    /// `YYYYMM` — the single settlement month this letter encloses.
-    pub year_month: &'a str,
+    /// Already resolved to the exact notes enclosed, across whatever month
+    /// range the caller asked for — `render` groups them into one column per
+    /// month by reading the month back out of each `DN<YYYYMM>-<NN>`.
     pub dn_numbers: Vec<String>,
 }
 
@@ -97,17 +98,33 @@ pub fn render(letter: &CoverLetter<'_>) -> Vec<u8> {
         p.text(L, Y_INTRO + i as f64 * 5.2, line, BODY, FS, BLACK);
     }
 
-    // A18.. — one column of DN numbers, wrapping to a new column if a month
-    // runs past the bottom of the block (a very large month, in practice).
+    // A18.. — one column per month, wrapping to a further column if a single
+    // month's notes run past the bottom of the block. The month itself isn't
+    // a separate field on `dn_numbers` — it's read back out of each
+    // `DN<YYYYMM>-<NN>`, so a multi-month enclosure never needs a second list
+    // to stay in sync with the first.
     let max_rows = ((Y_LIST_BOTTOM - Y_LIST_TOP) / LIST_ROW_H).floor().max(1.0) as usize;
     let col_w = 32.0;
     if letter.dn_numbers.is_empty() {
-        p.text(L, Y_LIST_TOP, "(no debit notes for this month)", Font::HelveticaOblique, 9.0, BLACK);
+        p.text(L, Y_LIST_TOP, "(no debit notes for this period)", Font::HelveticaOblique, 9.0, BLACK);
     } else {
-        for (i, n) in letter.dn_numbers.iter().enumerate() {
-            let col = i / max_rows;
-            let row = i % max_rows;
-            p.text(L + col as f64 * col_w, Y_LIST_TOP + row as f64 * LIST_ROW_H, n, Font::Courier, 9.5, BLACK);
+        let mut columns: Vec<Vec<&str>> = Vec::new();
+        let mut current_month = "";
+        for n in &letter.dn_numbers {
+            let month = dn_month(n);
+            let starts_new_column = columns.is_empty()
+                || month != current_month
+                || columns.last().is_some_and(|c| c.len() >= max_rows);
+            if starts_new_column {
+                columns.push(Vec::new());
+                current_month = month;
+            }
+            columns.last_mut().unwrap().push(n.as_str());
+        }
+        for (col, numbers) in columns.iter().enumerate() {
+            for (row, n) in numbers.iter().enumerate() {
+                p.text(L + col as f64 * col_w, Y_LIST_TOP + row as f64 * LIST_ROW_H, n, Font::Courier, 9.5, BLACK);
+            }
         }
     }
 
@@ -119,6 +136,12 @@ pub fn render(letter: &CoverLetter<'_>) -> Vec<u8> {
     p.text(L, Y_SIGNATORY_TITLE, &s.signatory_title, BODY, FS, BLACK);
 
     pdf.to_bytes()
+}
+
+/// `"DN202508-11"` -> `"202508"` — the month a DN number was issued in, read
+/// straight out of the number rather than carried alongside it.
+fn dn_month(dn: &str) -> &str {
+    dn.get(2..8).unwrap_or("")
 }
 
 /// `202609` -> `September 2026`, for the column headings.
@@ -168,7 +191,6 @@ mod tests {
             settings: &settings,
             letter_date: "2026-09-30",
             attn_name: "Ms Chia Ching Lian",
-            year_month: "202609",
             dn_numbers: vec![],
         });
         assert!(bytes.starts_with(b"%PDF-1.4"));
@@ -194,7 +216,39 @@ mod tests {
             settings: &settings,
             letter_date: "2026-09-30",
             attn_name: "Ms Chia Ching Lian",
-            year_month: "202609",
+            dn_numbers: numbers,
+        });
+        assert!(bytes.starts_with(b"%PDF-1.4"));
+    }
+
+    #[test]
+    fn dn_month_reads_the_month_out_of_the_number() {
+        assert_eq!(dn_month("DN202508-11"), "202508");
+        assert_eq!(dn_month("DN202609-01"), "202609");
+        assert_eq!(dn_month(""), "");
+    }
+
+    #[test]
+    fn a_multi_month_enclosure_still_renders() {
+        let customer = Customer {
+            id: 1,
+            name: "Sabah Rubber Industry Board".into(),
+            address_line1: String::new(),
+            address_line2: String::new(),
+            address_line3: String::new(),
+            address_line4: String::new(),
+            address_line5: String::new(),
+            attention: String::new(),
+            active: true,
+        };
+        let settings = Settings::default();
+        let mut numbers: Vec<String> = (11..=16).map(|i| format!("DN202508-{i:02}")).collect();
+        numbers.extend((1..=13).map(|i| format!("DN202609-{i:02}")));
+        let bytes = render(&CoverLetter {
+            customer: &customer,
+            settings: &settings,
+            letter_date: "2026-09-30",
+            attn_name: "Ms Chia Ching Lian",
             dn_numbers: numbers,
         });
         assert!(bytes.starts_with(b"%PDF-1.4"));

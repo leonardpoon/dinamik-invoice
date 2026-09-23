@@ -4,6 +4,9 @@
 
 export type CostCategory = 'PORT' | 'TRANSPORT' | 'MISC'
 export type CostBasis = 'PER_CONTAINER' | 'PER_BOX' | 'PER_MT' | 'FLAT'
+/** The customer-facing charge is identical either way; only which rate card
+ * seeds the accountant-only cost lines differs. */
+export type ShipmentType = 'CONTAINER' | 'BREAKBULK'
 export type NoteStatus = 'issued' | 'filed'
 
 export const COST_CATEGORIES: CostCategory[] = ['PORT', 'TRANSPORT', 'MISC']
@@ -57,6 +60,7 @@ export interface Customer {
 
 export interface RateDefault {
   id: number
+  shipmentType: ShipmentType
   category: CostCategory
   code: string
   label: string
@@ -89,6 +93,15 @@ export interface Preset {
   boxesPerContainer: number
   mtPerContainer: number
   contractNo: string
+  boxes: number
+  oceanVessel: string
+  oceanVoyage: string
+}
+
+/** A prior note's feeder call, offered back when the vessel + voyage match. */
+export interface FeederMatch {
+  feederArrivalDate: string
+  blPrefix: string
 }
 
 /** What the form sends. Everything derived is absent by design. */
@@ -106,6 +119,7 @@ export interface DebitNoteInput {
   boxesPerContainer: number
   mtPerContainer: number
   productDesc: string
+  shipmentType: ShipmentType
   feederVessel: string
   feederVoyage: string
   feederArrivalDate: string
@@ -163,6 +177,7 @@ export interface DebitNoteSummary {
   oceanVessel: string
   destination: string
   productDesc: string
+  shipmentType: ShipmentType
   boxes: number
   containers: number
   tonnage: number

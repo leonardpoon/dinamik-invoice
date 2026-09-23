@@ -1,8 +1,11 @@
 // "Cover Letter" — the workbook's second sheet, built from the register.
 //
-// Pick a customer and a single settlement month; the enclosed debit note
-// numbers are always read from the database, never typed, which is the bit
-// the spreadsheet got wrong often enough to matter.
+// Pick a customer and a From/To month range (a single month is just a range
+// of one); the enclosed debit note numbers are always read from the
+// database, never typed, which is the bit the spreadsheet got wrong often
+// enough to matter. A range spanning more than one month prints as one
+// column per month on the letter, grouped by the PDF itself from each DN
+// number rather than by anything tracked here.
 //
 // The customer and the addressee's name are "sticky" — saved to Settings as
 // they change, so the letter reopens with the same two values next time,
@@ -27,7 +30,8 @@ interface Props {
 export default function CoverLetter({ store, notify }: Props) {
   const [customerId, setCustomerId] = useState(0)
   const [attnName, setAttnName] = useState('')
-  const [yearMonth, setYearMonth] = useState(currentYearMonth)
+  const [fromYearMonth, setFromYearMonth] = useState(currentYearMonth)
+  const [toYearMonth, setToYearMonth] = useState(currentYearMonth)
   const [letterDate, setLetterDate] = useState(todayIso)
   const [companyOpen, setCompanyOpen] = useState(false)
 
@@ -44,27 +48,40 @@ export default function CoverLetter({ store, notify }: Props) {
 
   const customer = store.customers.find((c) => c.id === customerId) ?? null
 
-  // Only months this customer actually has notes in are worth picking.
+  // Only years this customer actually has notes in are worth picking.
   const years = useMemo(() => {
     if (!customer) return []
     const s = new Set(
       store.notes.filter((n) => n.customerName === customer.name).map((n) => n.yearMonth.slice(0, 4)),
     )
-    s.add(yearMonth.slice(0, 4))
+    s.add(fromYearMonth.slice(0, 4))
+    s.add(toYearMonth.slice(0, 4))
     return [...s].sort().reverse()
-  }, [store.notes, customer, yearMonth])
+  }, [store.notes, customer, fromYearMonth, toYearMonth])
 
-  const year = parseInt(yearMonth.slice(0, 4), 10)
-  const month = parseInt(yearMonth.slice(4), 10)
+  const fromYear = parseInt(fromYearMonth.slice(0, 4), 10)
+  const fromMonth = parseInt(fromYearMonth.slice(4), 10)
+  const toYear = parseInt(toYearMonth.slice(0, 4), 10)
+  const toMonth = parseInt(toYearMonth.slice(4), 10)
+
+  // Swapped so a reversed range still counts and previews correctly, the
+  // same way the Rust side reads it.
+  const rangeLo = fromYearMonth <= toYearMonth ? fromYearMonth : toYearMonth
+  const rangeHi = fromYearMonth <= toYearMonth ? toYearMonth : fromYearMonth
   const enclosedCount = useMemo(
-    () => store.notes.filter((n) => n.customerName === customer?.name && n.yearMonth === yearMonth).length,
-    [store.notes, customer, yearMonth],
+    () =>
+      store.notes.filter(
+        (n) => n.customerName === customer?.name && n.yearMonth >= rangeLo && n.yearMonth <= rangeHi,
+      ).length,
+    [store.notes, customer, rangeLo, rangeHi],
   )
 
   const canRender = customerId > 0
   const preview = usePdfPreview(
-    canRender ? () => api.coverLetterPdf(customerId, yearMonth, attnName, letterDate).then(pdfUrl) : null,
-    [customerId, yearMonth, attnName, letterDate],
+    canRender
+      ? () => api.coverLetterPdf(customerId, fromYearMonth, toYearMonth, attnName, letterDate).then(pdfUrl)
+      : null,
+    [customerId, fromYearMonth, toYearMonth, attnName, letterDate],
   )
 
   function selectCustomer(id: number) {
@@ -110,28 +127,48 @@ export default function CoverLetter({ store, notify }: Props) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs tracking-widest uppercase font-medium" style={{ color: 'var(--muted-foreground)' }}>Year</label>
-              <select
-                value={year}
-                onChange={(e) => setYearMonth(`${e.target.value}${String(month).padStart(2, '0')}`)}
-              >
-                {(years.length ? years : [String(year)]).map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
+              <label className="text-xs tracking-widest uppercase font-medium" style={{ color: 'var(--muted-foreground)' }}>From</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <select
+                  value={fromYear}
+                  onChange={(e) => setFromYearMonth(`${e.target.value}${String(fromMonth).padStart(2, '0')}`)}
+                >
+                  {(years.length ? years : [String(fromYear)]).map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <select
+                  value={fromMonth}
+                  onChange={(e) => setFromYearMonth(`${fromYear}${e.target.value.padStart(2, '0')}`)}
+                >
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs tracking-widest uppercase font-medium" style={{ color: 'var(--muted-foreground)' }}>Month</label>
-              <select
-                value={month}
-                onChange={(e) => setYearMonth(`${year}${e.target.value.padStart(2, '0')}`)}
-              >
-                {MONTH_NAMES.map((name, i) => (
-                  <option key={name} value={i + 1}>{name}</option>
-                ))}
-              </select>
+              <label className="text-xs tracking-widest uppercase font-medium" style={{ color: 'var(--muted-foreground)' }}>To</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <select
+                  value={toYear}
+                  onChange={(e) => setToYearMonth(`${e.target.value}${String(toMonth).padStart(2, '0')}`)}
+                >
+                  {(years.length ? years : [String(toYear)]).map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <select
+                  value={toMonth}
+                  onChange={(e) => setToYearMonth(`${toYear}${e.target.value.padStart(2, '0')}`)}
+                >
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -177,14 +214,18 @@ export default function CoverLetter({ store, notify }: Props) {
               {customer?.name ?? 'Cover Letter'}
             </span>
             <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>
-              {monthLabel(yearMonth)}
+              {fromYearMonth === toYearMonth ? monthLabel(fromYearMonth) : `${monthLabel(fromYearMonth)} – ${monthLabel(toYearMonth)}`}
             </span>
           </div>
           {canRender && (
             <DownloadBar
               label="Download PDF"
-              filename={`cover-letter-${yearMonth}.pdf`}
-              load={() => api.coverLetterPdf(customerId, yearMonth, attnName, letterDate)}
+              filename={
+                fromYearMonth === toYearMonth
+                  ? `cover-letter-${fromYearMonth}.pdf`
+                  : `cover-letter-${fromYearMonth}-${toYearMonth}.pdf`
+              }
+              load={() => api.coverLetterPdf(customerId, fromYearMonth, toYearMonth, attnName, letterDate)}
               notify={notify}
             />
           )}

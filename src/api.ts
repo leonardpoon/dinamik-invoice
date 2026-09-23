@@ -15,10 +15,12 @@ import type {
   DebitNote,
   DebitNoteInput,
   DebitNoteSummary,
+  FeederMatch,
   Preset,
   Preview,
   RateDefault,
   Settings,
+  ShipmentType,
 } from './types'
 
 export const api = {
@@ -29,8 +31,9 @@ export const api = {
   saveCustomer: (customer: Customer) => invoke<number>('save_customer', { customer }),
   deleteCustomer: (id: number) => invoke<void>('delete_customer', { id }),
 
-  getRateCard: () => invoke<RateDefault[]>('get_rate_card'),
-  saveRateCard: (lines: RateDefault[]) => invoke<RateDefault[]>('save_rate_card', { lines }),
+  getRateCard: (shipmentType: ShipmentType) => invoke<RateDefault[]>('get_rate_card', { shipmentType }),
+  saveRateCard: (shipmentType: ShipmentType, lines: RateDefault[]) =>
+    invoke<RateDefault[]>('save_rate_card', { shipmentType, lines }),
 
   listPresets: () => invoke<Preset[]>('list_presets'),
   savePreset: (preset: Preset) => invoke<Preset[]>('save_preset', { preset }),
@@ -39,6 +42,8 @@ export const api = {
   listNotes: () => invoke<DebitNoteSummary[]>('list_notes'),
   getNote: (id: number) => invoke<DebitNote>('get_note', { id }),
   nextDnNumber: (yearMonth: string) => invoke<string>('next_dn_number', { yearMonth }),
+  feederMatch: (feederVessel: string, feederVoyage: string, excludeId?: number) =>
+    invoke<FeederMatch | null>('feeder_match', { feederVessel, feederVoyage, excludeId: excludeId ?? null }),
   createNote: (input: DebitNoteInput) => invoke<DebitNote>('create_note', { input }),
   updateNote: (id: number, input: DebitNoteInput) => invoke<DebitNote>('update_note', { id, input }),
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
@@ -49,6 +54,7 @@ export const api = {
     boxesPerContainer: number
     mtPerContainer: number
     ratePerMt: number
+    shipmentType: ShipmentType
     /** Omit to price with the current rate card; pass lines to override it. */
     costs?: CostLine[]
   }) => invoke<Preview>('preview_figures', { input }),
@@ -59,8 +65,14 @@ export const api = {
   notePdfCopy: (id: number, copy: 'customer' | 'accountant') =>
     invoke<string>('note_pdf_copy', { id, copy }),
   filingReportPdf: (yearMonth: string) => invoke<string>('filing_report_pdf', { yearMonth }),
-  coverLetterPdf: (customerId: number, yearMonth: string, attnName: string, letterDate?: string) =>
-    invoke<string>('cover_letter_pdf', { customerId, yearMonth, attnName, letterDate: letterDate ?? null }),
+  coverLetterPdf: (customerId: number, fromYearMonth: string, toYearMonth: string, attnName: string, letterDate?: string) =>
+    invoke<string>('cover_letter_pdf', {
+      customerId,
+      fromYearMonth,
+      toYearMonth,
+      attnName,
+      letterDate: letterDate ?? null,
+    }),
 }
 
 /** base64 -> a blob URL an `<iframe>` can render. Caller revokes it. */

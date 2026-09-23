@@ -13,7 +13,8 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::calc::{
-    self, CargoInput, CostBasis, CostCategory, CostContext, CostLine, compute_cargo, compute_costs,
+    self, CargoInput, CostBasis, CostCategory, CostContext, CostLine, ShipmentType, compute_cargo,
+    compute_costs,
 };
 use crate::error::{AppError, Result};
 use crate::models::*;
@@ -86,15 +87,16 @@ impl Db {
             CREATE INDEX IF NOT EXISTS idx_customer_name ON customer(name);
 
             CREATE TABLE IF NOT EXISTS rate_default (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                category   TEXT NOT NULL,
-                code       TEXT NOT NULL,
-                label      TEXT NOT NULL DEFAULT '',
-                basis      TEXT NOT NULL,
-                rate       REAL NOT NULL DEFAULT 0,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                active     INTEGER NOT NULL DEFAULT 1,
-                UNIQUE (category, code)
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                shipment_type TEXT NOT NULL DEFAULT 'CONTAINER',
+                category      TEXT NOT NULL,
+                code          TEXT NOT NULL,
+                label         TEXT NOT NULL DEFAULT '',
+                basis         TEXT NOT NULL,
+                rate          REAL NOT NULL DEFAULT 0,
+                sort_order    INTEGER NOT NULL DEFAULT 0,
+                active        INTEGER NOT NULL DEFAULT 1,
+                UNIQUE (shipment_type, category, code)
             );
 
             CREATE TABLE IF NOT EXISTS preset (
@@ -110,6 +112,9 @@ impl Db {
                 boxes_per_container REAL NOT NULL DEFAULT 16,
                 mt_per_container    REAL NOT NULL DEFAULT 20.16,
                 contract_no         TEXT NOT NULL DEFAULT '',
+                boxes               REAL NOT NULL DEFAULT 0,
+                ocean_vessel        TEXT NOT NULL DEFAULT '',
+                ocean_voyage        TEXT NOT NULL DEFAULT '',
                 UNIQUE (buyer_name, destination)
             );
 
@@ -135,6 +140,7 @@ impl Db {
                 containers           REAL NOT NULL DEFAULT 0,
                 tonnage              REAL NOT NULL DEFAULT 0,
                 product_desc         TEXT NOT NULL DEFAULT '',
+                shipment_type        TEXT NOT NULL DEFAULT 'CONTAINER',
 
                 feeder_vessel        TEXT NOT NULL DEFAULT '',
                 feeder_voyage        TEXT NOT NULL DEFAULT '',
@@ -196,8 +202,47 @@ impl Db {
             "ALTER TABLE setting ADD COLUMN email TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE setting ADD COLUMN cover_letter_customer_id INTEGER",
             "ALTER TABLE setting ADD COLUMN cover_letter_attn_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE preset ADD COLUMN boxes REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE preset ADD COLUMN ocean_vessel TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE preset ADD COLUMN ocean_voyage TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE debit_note ADD COLUMN shipment_type TEXT NOT NULL DEFAULT 'CONTAINER'",
         ] {
             let _ = self.conn.execute(stmt, []);
+        }
+
+        // `rate_default` gained a `shipment_type` dimension so Container and
+        // Breakbulk can each have their own card. Its old UNIQUE(category, code)
+        // has to be rebuilt as UNIQUE(shipment_type, category, code) — SQLite
+        // can't alter a constraint with ADD COLUMN — so an existing database's
+        // table is recreated wholesale, with every existing row kept as the
+        // Container card exactly as it printed before this migration.
+        let missing_shipment_type = self
+            .conn
+            .prepare("SELECT shipment_type FROM rate_default LIMIT 1")
+            .is_err();
+        if missing_shipment_type {
+            self.conn.execute_batch(
+                r#"
+                CREATE TABLE rate_default_migrated (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    shipment_type TEXT NOT NULL DEFAULT 'CONTAINER',
+                    category      TEXT NOT NULL,
+                    code          TEXT NOT NULL,
+                    label         TEXT NOT NULL DEFAULT '',
+                    basis         TEXT NOT NULL,
+                    rate          REAL NOT NULL DEFAULT 0,
+                    sort_order    INTEGER NOT NULL DEFAULT 0,
+                    active        INTEGER NOT NULL DEFAULT 1,
+                    UNIQUE (shipment_type, category, code)
+                );
+                INSERT INTO rate_default_migrated
+                    (id, shipment_type, category, code, label, basis, rate, sort_order, active)
+                    SELECT id, 'CONTAINER', category, code, label, basis, rate, sort_order, active
+                    FROM rate_default;
+                DROP TABLE rate_default;
+                ALTER TABLE rate_default_migrated RENAME TO rate_default;
+                "#,
+            )?;
         }
         Ok(())
     }
@@ -209,14 +254,30 @@ impl Db {
             self.save_settings(&Settings::default())?;
         }
 
-        let has_rates: i64 =
-            self.conn.query_row("SELECT COUNT(*) FROM rate_default", [], |r| r.get(0))?;
-        if has_rates == 0 {
+        // Each shipment type is seeded independently — a database upgrading
+        // from before shipment types existed already has a full Container
+        // card (carried over by the migration above) but no Breakbulk rows at
+        // all, and that empty card needs the same starting template a truly
+        // fresh install gets, not silence.
+        for shipment_type in [ShipmentType::Container, ShipmentType::Breakbulk] {
+            let has_rates: i64 = self.conn.query_row(
+                "SELECT COUNT(*) FROM rate_default WHERE shipment_type = ?1",
+                params![shipment_type.as_str()],
+                |r| r.get(0),
+            )?;
+            if has_rates > 0 {
+                continue;
+            }
+            // Container's template is the workbook's real figures;
+            // Breakbulk's is a starting point only — almost all of it is
+            // priced per container, which breakbulk cargo never has, so it's
+            // the accountant's to correct in Settings before it's trusted.
             for l in calc::default_rate_card() {
                 self.conn.execute(
-                    "INSERT INTO rate_default (category, code, label, basis, rate, sort_order, active)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                    "INSERT INTO rate_default (shipment_type, category, code, label, basis, rate, sort_order, active)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
                     params![
+                        shipment_type.as_str(),
                         l.category.as_str(),
                         l.code,
                         l.label,
@@ -419,16 +480,18 @@ impl Db {
 
     // ----- rate card --------------------------------------------------------
 
-    pub fn rate_card(&self) -> Result<Vec<RateDefault>> {
+    pub fn rate_card(&self, shipment_type: ShipmentType) -> Result<Vec<RateDefault>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, category, code, label, basis, rate, sort_order, active
+            "SELECT id, shipment_type, category, code, label, basis, rate, sort_order, active
              FROM rate_default
+             WHERE shipment_type = ?1
              ORDER BY CASE category WHEN 'PORT' THEN 0 WHEN 'TRANSPORT' THEN 1 ELSE 2 END,
                       sort_order, code",
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map(params![shipment_type.as_str()], |r| {
             Ok(RateDefault {
                 id: r.get("id")?,
+                shipment_type: ShipmentType::parse(&r.get::<_, String>("shipment_type")?),
                 category: CostCategory::parse(&r.get::<_, String>("category")?)
                     .unwrap_or(CostCategory::Misc),
                 code: r.get("code")?,
@@ -442,22 +505,25 @@ impl Db {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Replaces the whole card in one transaction — the editor sends the full
-    /// table back, so a partial apply would silently drop rows the user deleted.
-    pub fn save_rate_card(&mut self, lines: &[RateDefault]) -> Result<()> {
+    /// Replaces the given shipment type's whole card in one transaction — the
+    /// editor sends that card's full table back, so a partial apply would
+    /// silently drop rows the user deleted. The other shipment type's card is
+    /// untouched.
+    pub fn save_rate_card(&mut self, shipment_type: ShipmentType, lines: &[RateDefault]) -> Result<()> {
         let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM rate_default", [])?;
+        tx.execute("DELETE FROM rate_default WHERE shipment_type = ?1", params![shipment_type.as_str()])?;
         for l in lines {
             if l.code.trim().is_empty() {
                 continue;
             }
             tx.execute(
-                "INSERT INTO rate_default (category, code, label, basis, rate, sort_order, active)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(category, code) DO UPDATE SET
+                "INSERT INTO rate_default (shipment_type, category, code, label, basis, rate, sort_order, active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(shipment_type, category, code) DO UPDATE SET
                      label = excluded.label, basis = excluded.basis, rate = excluded.rate,
                      sort_order = excluded.sort_order, active = excluded.active",
                 params![
+                    shipment_type.as_str(),
                     l.category.as_str(),
                     l.code.trim(),
                     if l.label.trim().is_empty() { l.code.trim() } else { l.label.trim() },
@@ -472,9 +538,9 @@ impl Db {
         Ok(())
     }
 
-    fn active_rate_card_as_cost_lines(&self) -> Result<Vec<CostLine>> {
+    fn active_rate_card_as_cost_lines(&self, shipment_type: ShipmentType) -> Result<Vec<CostLine>> {
         Ok(self
-            .rate_card()?
+            .rate_card(shipment_type)?
             .into_iter()
             .filter(|r| r.active)
             .map(|r| CostLine {
@@ -495,7 +561,7 @@ impl Db {
         let mut stmt = self.conn.prepare(
             "SELECT id, customer_id, buyer_name, destination, si_number, product_desc,
                     packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container,
-                    contract_no
+                    contract_no, boxes, ocean_vessel, ocean_voyage
              FROM preset ORDER BY buyer_name, destination",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -512,6 +578,9 @@ impl Db {
                 boxes_per_container: r.get("boxes_per_container")?,
                 mt_per_container: r.get("mt_per_container")?,
                 contract_no: r.get("contract_no")?,
+                boxes: r.get("boxes")?,
+                ocean_vessel: r.get("ocean_vessel")?,
+                ocean_voyage: r.get("ocean_voyage")?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -523,8 +592,9 @@ impl Db {
         }
         self.conn.execute(
             "INSERT INTO preset (customer_id, buyer_name, destination, si_number, product_desc,
-                 packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container, contract_no)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container, contract_no,
+                 boxes, ocean_vessel, ocean_voyage)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(buyer_name, destination) DO UPDATE SET
                  customer_id = excluded.customer_id,
                  si_number = excluded.si_number,
@@ -534,7 +604,10 @@ impl Db {
                  rate_per_mt = excluded.rate_per_mt,
                  boxes_per_container = excluded.boxes_per_container,
                  mt_per_container = excluded.mt_per_container,
-                 contract_no = excluded.contract_no",
+                 contract_no = excluded.contract_no,
+                 boxes = excluded.boxes,
+                 ocean_vessel = excluded.ocean_vessel,
+                 ocean_voyage = excluded.ocean_voyage",
             params![
                 p.customer_id,
                 p.buyer_name.trim(),
@@ -546,10 +619,46 @@ impl Db {
                 p.rate_per_mt,
                 p.boxes_per_container,
                 p.mt_per_container,
-                p.contract_no
+                p.contract_no,
+                p.boxes,
+                p.ocean_vessel,
+                p.ocean_voyage,
             ],
         )?;
         Ok(())
+    }
+
+    /// The most recent note sharing this feeder vessel + voyage, if any. The
+    /// same feeder call is often billed to more than one buyer, so the second
+    /// (and third...) note for it can skip retyping the arrival date and the
+    /// vessel/voyage half of the B/L number. `exclude_id` keeps a note being
+    /// edited from matching itself.
+    pub fn feeder_match(
+        &self,
+        feeder_vessel: &str,
+        feeder_voyage: &str,
+        exclude_id: Option<i64>,
+    ) -> Result<Option<FeederMatch>> {
+        let vessel = feeder_vessel.trim();
+        let voyage = feeder_voyage.trim();
+        if vessel.is_empty() || voyage.is_empty() {
+            return Ok(None);
+        }
+        let row = self
+            .conn
+            .query_row(
+                "SELECT feeder_arrival_date, bl_number FROM debit_note
+                 WHERE lower(trim(feeder_vessel)) = lower(?1) AND lower(trim(feeder_voyage)) = lower(?2)
+                   AND feeder_arrival_date <> '' AND id <> ?3
+                 ORDER BY id DESC LIMIT 1",
+                params![vessel, voyage, exclude_id.unwrap_or(-1)],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        Ok(row.map(|(feeder_arrival_date, bl_number)| FeederMatch {
+            feeder_arrival_date,
+            bl_prefix: bl_number.split('-').next().unwrap_or("").trim().to_string(),
+        }))
     }
 
     pub fn delete_preset(&self, id: i64) -> Result<()> {
@@ -574,7 +683,7 @@ impl Db {
         validate(input)?;
         let costs = match &input.costs {
             Some(c) => c.clone(),
-            None => self.active_rate_card_as_cost_lines()?,
+            None => self.active_rate_card_as_cost_lines(input.shipment_type)?,
         };
 
         let running_no;
@@ -606,7 +715,7 @@ impl Db {
                 dn_number, year_month, running_no, dn_date, status, filed_at,
                 customer_id, buyer_name, customer_invoice_ref, si_number, contract_no,
                 boxes, packing_desc, boxes_per_container, mt_per_container, containers, tonnage,
-                product_desc, feeder_vessel, feeder_voyage, feeder_arrival_date, bl_number,
+                product_desc, shipment_type, feeder_vessel, feeder_voyage, feeder_arrival_date, bl_number,
                 p_number, p_descriptor,
                 ocean_vessel, ocean_voyage, destination, bl_date,
                 charge_desc, currency, rate_per_mt, charge_amount, total_amount, amount_in_words,
@@ -614,7 +723,7 @@ impl Db {
                 remarks, created_at, updated_at)
              VALUES (?, ?, ?, ?, 'issued', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 dn_number,
                 input.year_month,
@@ -632,6 +741,7 @@ impl Db {
                 d.cargo.containers,
                 d.cargo.tonnage,
                 input.product_desc,
+                input.shipment_type.as_str(),
                 input.feeder_vessel,
                 input.feeder_voyage,
                 input.feeder_arrival_date,
@@ -669,6 +779,13 @@ impl Db {
         let existing = self.debit_note(id)?;
         let costs = match &input.costs {
             Some(c) => c.clone(),
+            // Switching shipment type without also touching the costing block
+            // re-seeds from the new type's card — the old costs are priced
+            // for the wrong shipment entirely, so keeping them would be wrong,
+            // not conservative.
+            None if input.shipment_type != existing.shipment_type => {
+                self.active_rate_card_as_cost_lines(input.shipment_type)?
+            }
             None => existing.costs.clone(),
         };
 
@@ -695,6 +812,7 @@ impl Db {
                 customer_id = ?, buyer_name = ?, customer_invoice_ref = ?, si_number = ?,
                 contract_no = ?, boxes = ?, packing_desc = ?, boxes_per_container = ?,
                 mt_per_container = ?, containers = ?, tonnage = ?, product_desc = ?,
+                shipment_type = ?,
                 feeder_vessel = ?, feeder_voyage = ?, feeder_arrival_date = ?,
                 bl_number = ?, p_number = ?, p_descriptor = ?, ocean_vessel = ?, ocean_voyage = ?,
                 destination = ?, bl_date = ?, charge_desc = ?, currency = ?,
@@ -719,6 +837,7 @@ impl Db {
                 d.cargo.containers,
                 d.cargo.tonnage,
                 input.product_desc,
+                input.shipment_type.as_str(),
                 input.feeder_vessel,
                 input.feeder_voyage,
                 input.feeder_arrival_date,
@@ -819,7 +938,7 @@ impl Db {
             "SELECT n.id, n.dn_number, n.year_month, n.dn_date, n.status,
                     c.name AS customer_name, n.buyer_name, n.customer_invoice_ref, n.si_number,
                     n.contract_no, n.bl_number, n.p_number, n.feeder_vessel, n.ocean_vessel,
-                    n.destination, n.product_desc,
+                    n.destination, n.product_desc, n.shipment_type,
                     n.boxes, n.containers, n.tonnage, n.currency, n.total_amount,
                     n.total_cost, n.profit
              FROM debit_note n
@@ -844,6 +963,7 @@ impl Db {
                 ocean_vessel: r.get("ocean_vessel")?,
                 destination: r.get("destination")?,
                 product_desc: r.get("product_desc")?,
+                shipment_type: ShipmentType::parse(&r.get::<_, String>("shipment_type")?),
                 boxes: r.get("boxes")?,
                 containers: r.get("containers")?,
                 tonnage: r.get("tonnage")?,
@@ -1023,6 +1143,7 @@ fn row_to_note(r: &Row<'_>) -> rusqlite::Result<DebitNote> {
         containers: r.get("containers")?,
         tonnage: r.get("tonnage")?,
         product_desc: r.get("product_desc")?,
+        shipment_type: ShipmentType::parse(&r.get::<_, String>("shipment_type")?),
         feeder_vessel: r.get("feeder_vessel")?,
         feeder_voyage: r.get("feeder_voyage")?,
         feeder_arrival_date: r.get("feeder_arrival_date")?,
@@ -1074,6 +1195,7 @@ mod tests {
             boxes_per_container: 16.0,
             mt_per_container: 20.16,
             product_desc: "SMR 20 Rubber".into(),
+            shipment_type: ShipmentType::Container,
             feeder_vessel: "Jade Star".into(),
             feeder_voyage: "2610W".into(),
             feeder_arrival_date: "2026-09-22".into(),
@@ -1096,7 +1218,10 @@ mod tests {
     fn seeds_settings_rate_card_and_a_customer() {
         let db = Db::open_in_memory().unwrap();
         assert_eq!(db.settings().unwrap().default_rate_per_mt, 54.0);
-        assert_eq!(db.rate_card().unwrap().len(), 17);
+        assert_eq!(db.rate_card(ShipmentType::Container).unwrap().len(), 17);
+        // Breakbulk gets its own, independent card, seeded from the same
+        // starting template so it isn't empty on first use.
+        assert_eq!(db.rate_card(ShipmentType::Breakbulk).unwrap().len(), 17);
         assert_eq!(db.customers().unwrap().len(), 1);
     }
 
@@ -1115,6 +1240,53 @@ mod tests {
         assert_eq!(n.costs.len(), 17);
         assert_eq!(n.profit, calc::round2(n.total_amount - n.total_cost));
         assert_eq!(n.customer.name, "Sabah Rubber Industry Board");
+    }
+
+    #[test]
+    fn a_breakbulk_note_prices_from_its_own_card() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+
+        // Editing the Breakbulk card only — Container's stays at its default.
+        let mut breakbulk_card = db.rate_card(ShipmentType::Breakbulk).unwrap();
+        breakbulk_card.retain(|l| l.code != "HSC");
+        db.save_rate_card(ShipmentType::Breakbulk, &breakbulk_card).unwrap();
+
+        let mut input = sample_input(cid);
+        input.shipment_type = ShipmentType::Breakbulk;
+        let id = db.create_debit_note(&input).unwrap();
+        let n = db.debit_note(id).unwrap();
+
+        assert_eq!(n.shipment_type, ShipmentType::Breakbulk);
+        assert_eq!(n.costs.len(), 16);
+        assert!(!n.costs.iter().any(|c| c.code == "HSC"));
+        // The customer-facing charge is unaffected by shipment type.
+        assert_eq!(n.total_amount, 6123.6);
+
+        // Container notes still see all 17 lines, unaffected by the edit above.
+        let container_id = db.create_debit_note(&sample_input(cid)).unwrap();
+        assert_eq!(db.debit_note(container_id).unwrap().costs.len(), 17);
+    }
+
+    #[test]
+    fn switching_shipment_type_on_update_reprices_the_costing() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+
+        let mut breakbulk_card = db.rate_card(ShipmentType::Breakbulk).unwrap();
+        breakbulk_card.retain(|l| l.code != "HSC");
+        db.save_rate_card(ShipmentType::Breakbulk, &breakbulk_card).unwrap();
+
+        let id = db.create_debit_note(&sample_input(cid)).unwrap();
+        assert_eq!(db.debit_note(id).unwrap().costs.len(), 17);
+
+        let mut edited = sample_input(cid);
+        edited.shipment_type = ShipmentType::Breakbulk;
+        db.update_debit_note(id, &edited).unwrap();
+
+        let n = db.debit_note(id).unwrap();
+        assert_eq!(n.shipment_type, ShipmentType::Breakbulk);
+        assert_eq!(n.costs.len(), 16);
     }
 
     #[test]
@@ -1208,6 +1380,55 @@ mod tests {
     }
 
     #[test]
+    fn feeder_match_offers_back_the_arrival_date_and_bl_prefix() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        let id = db.create_debit_note(&sample_input(cid)).unwrap();
+
+        // Same vessel and voyage, different case and stray whitespace — a
+        // second buyer's note for the same feeder call.
+        let hit = db.feeder_match(" jade star ", "2610w", None).unwrap().unwrap();
+        assert_eq!(hit.feeder_arrival_date, "2026-09-22");
+        assert_eq!(hit.bl_prefix, "JJST2610W");
+
+        assert!(db.feeder_match("Jade Star", "9999X", None).unwrap().is_none());
+        assert!(db.feeder_match("", "2610W", None).unwrap().is_none());
+
+        // A note excludes itself, e.g. while it's being edited.
+        assert!(db.feeder_match("Jade Star", "2610W", Some(id)).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_preset_round_trips_boxes_and_outward_vessel() {
+        let db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        db.save_preset(&Preset {
+            id: 0,
+            customer_id: Some(cid),
+            buyer_name: "Bridgestone Singapore Pte Ltd".into(),
+            destination: "Savannah, USA".into(),
+            si_number: String::new(),
+            product_desc: "SMR 20 Rubber".into(),
+            packing_desc: "Metal  Boxes (MB5)".into(),
+            currency: "SGD".into(),
+            rate_per_mt: 54.0,
+            boxes_per_container: 16.0,
+            mt_per_container: 20.16,
+            contract_no: "283230".into(),
+            boxes: 90.0,
+            ocean_vessel: "Zim Mount Vinson".into(),
+            ocean_voyage: "12E".into(),
+        })
+        .unwrap();
+
+        let presets = db.presets().unwrap();
+        assert_eq!(presets.len(), 1);
+        assert_eq!(presets[0].boxes, 90.0);
+        assert_eq!(presets[0].ocean_vessel, "Zim Mount Vinson");
+        assert_eq!(presets[0].ocean_voyage, "12E");
+    }
+
+    #[test]
     fn validation_rejects_empty_cargo() {
         let mut db = Db::open_in_memory().unwrap();
         let cid = db.customers().unwrap()[0].id;
@@ -1219,12 +1440,61 @@ mod tests {
     #[test]
     fn saving_the_rate_card_replaces_it_wholesale() {
         let mut db = Db::open_in_memory().unwrap();
-        let mut card = db.rate_card().unwrap();
+        let mut card = db.rate_card(ShipmentType::Container).unwrap();
         card.truncate(3);
         card[0].rate = 99.0;
-        db.save_rate_card(&card).unwrap();
-        let after = db.rate_card().unwrap();
+        db.save_rate_card(ShipmentType::Container, &card).unwrap();
+        let after = db.rate_card(ShipmentType::Container).unwrap();
         assert_eq!(after.len(), 3);
         assert_eq!(after[0].rate, 99.0);
+
+        // The other shipment type's card is untouched.
+        assert_eq!(db.rate_card(ShipmentType::Breakbulk).unwrap().len(), 17);
+    }
+
+    /// A real installed copy predates shipment types: its `rate_default` has
+    /// no `shipment_type` column and the old `UNIQUE(category, code)`. Opening
+    /// it must rebuild the table without losing the accountant's real, edited
+    /// rates, and must give Breakbulk a starting card rather than leaving it
+    /// silently empty.
+    #[test]
+    fn migrating_an_old_database_keeps_its_rates_and_adds_a_breakbulk_card() {
+        let path = std::env::temp_dir()
+            .join(format!("dinamik-invoice-migration-test-{}.sqlite3", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE rate_default (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category   TEXT NOT NULL,
+                    code       TEXT NOT NULL,
+                    label      TEXT NOT NULL DEFAULT '',
+                    basis      TEXT NOT NULL,
+                    rate       REAL NOT NULL DEFAULT 0,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    active     INTEGER NOT NULL DEFAULT 1,
+                    UNIQUE (category, code)
+                );
+                INSERT INTO rate_default (category, code, label, basis, rate, sort_order, active)
+                    VALUES ('PORT', 'HSC', 'HSC', 'PER_CONTAINER', 30.5, 10, 1);",
+            )
+            .unwrap();
+        }
+
+        let db = Db::open(&path).unwrap();
+
+        let container = db.rate_card(ShipmentType::Container).unwrap();
+        assert_eq!(container.len(), 1);
+        assert_eq!(container[0].code, "HSC");
+        assert_eq!(container[0].rate, 30.5);
+        assert_eq!(container[0].shipment_type, ShipmentType::Container);
+
+        let breakbulk = db.rate_card(ShipmentType::Breakbulk).unwrap();
+        assert_eq!(breakbulk.len(), 17);
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
     }
 }

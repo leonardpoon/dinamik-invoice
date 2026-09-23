@@ -31,7 +31,12 @@ const FS: f64 = 10.0;
 const Y_TITLE: f64 = 24.4; // row 1, 16pt bold
 const Y_ADDR: f64 = 29.5; // row 2, 9pt
 const Y_REGNO: f64 = 34.0; // row 3, 9pt
-const Y_HR: f64 = 37.5;
+
+// Reference HTML (`References for Claude/Debit Note Reference HTML.html`) draws
+// no rule under the letterhead — the gap to the bill-to block is whitespace
+// only — then a heavier rule after the bill-to block and a hairline again
+// after the shipment/carriage block, right before the charge line.
+const Y_DIVIDER_BILLTO: f64 = 82.0; // its ".divider-solid", between bill-to and "Your Invoice No."
 
 const Y_BILLTO_1: f64 = 52.7; // row 7  (name / "Debit Note" title)
 const Y_BILLTO_2: f64 = 57.4; // row 8
@@ -115,7 +120,6 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     p.text_aligned(writer::A4_W / 2.0, Y_TITLE, &s.company_name, Font::TahomaBold, 16.0, BLACK, Align::Center);
     p.text_aligned(writer::A4_W / 2.0, Y_ADDR, &s.address_line, BODY, 9.0, BLACK, Align::Center);
     p.text_aligned(writer::A4_W / 2.0, Y_REGNO, &s.registration_no, BODY, 9.0, BLACK, Align::Center);
-    p.hline(L, R, Y_HR, 0.5, BLACK);
 
     // --- bill-to block (rows 7-12) and the title / No. / Date (L7-N12) ---
     let mut lines: Vec<&str> = vec![note.customer.name.as_str()];
@@ -126,11 +130,13 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
         p.text(L, *row_y, line, font, FS, BLACK);
     }
 
-    p.text(LABEL_X, Y_BILLTO_1, "Debit Note", Font::TahomaBold, 14.0, BLACK);
+    p.text(LABEL_X, Y_BILLTO_1, "Debit Note", Font::TahomaBold, 12.0, BLACK);
     p.text(LABEL_X, Y_BILLTO_3, "No.  :", BODY, FS, BLACK);
     p.text(VALUE_X, Y_BILLTO_3, &note.dn_number, BODY_B, FS, BLACK);
     p.text(LABEL_X, Y_BILLTO_6, "Date  :", BODY, FS, BLACK);
     p.text(VALUE_X, Y_BILLTO_6, &long_date(&note.dn_date), BODY, FS, BLACK);
+
+    p.hline(L, R, Y_DIVIDER_BILLTO, 0.6, BLACK);
 
     // --- reference lines (rows 16-17) ------------------------------------
     if !note.customer_invoice_ref.trim().is_empty() {
@@ -155,6 +161,8 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     let mut y = Y_FEEDER;
     if !note.feeder_vessel.trim().is_empty() {
         p.text(L, y, &format!("Ex {}", note.feeder_vessel.trim()), BODY, FS, BLACK);
+        // "Voy 2610W   Arrd" stays in the left column; the reference HTML puts
+        // the date itself in the right column, level with M/Tons and Contract No.
         let mut tail = String::new();
         if !note.feeder_voyage.trim().is_empty() {
             tail.push_str(&format!("Voy {}", note.feeder_voyage.trim()));
@@ -163,10 +171,13 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
             if !tail.is_empty() {
                 tail.push_str("    ");
             }
-            tail.push_str(&format!("Arrd  {}", long_date(&note.feeder_arrival_date)));
+            tail.push_str("Arrd");
         }
         if !tail.is_empty() {
             p.text(L + 46.0, y, &tail, BODY, FS, BLACK);
+        }
+        if !note.feeder_arrival_date.trim().is_empty() {
+            p.text(LABEL_X, y, &long_date(&note.feeder_arrival_date), BODY, FS, BLACK);
         }
         y = Y_BL;
     }
@@ -207,6 +218,7 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     // land in the same place whatever the cargo block's height; a long
     // address pushes past the anchor rather than the other way round.
     let charge_y = y.max(Y_CHARGE_MIN);
+    p.hline(L, R, charge_y - 4.5, 0.35, BLACK);
     let sym = currency_symbol(&note.currency);
     p.text(L, charge_y, &note.charge_desc, BODY, FS, BLACK);
     p.text(LABEL_X - 28.0, charge_y, &format!("@ {sym}"), BODY, FS, BLACK);
@@ -230,8 +242,10 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     }
 
     // --- payment instructions (rows 39-40) -------------------------------
-    p.text(L, Y_PAY1, &s.payment_line1, BODY, 8.0, BLACK);
-    p.text(L, Y_PAY2, &s.payment_line2, BODY, 8.0, BLACK);
+    // The reference HTML doesn't give `.payment-terms` its own smaller class,
+    // so it inherits the sheet's 10pt body size rather than a footnote size.
+    p.text(L, Y_PAY1, &s.payment_line1, BODY, FS, BLACK);
+    p.text(L, Y_PAY2, &s.payment_line2, BODY, FS, BLACK);
 
     // --- remarks, which the workbook leaves to a free row ----------------
     if !note.remarks.trim().is_empty() {
@@ -247,9 +261,9 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     // stack of notes can be signed without hunting for the line. The
     // workbook itself never names a signatory here — that only appears on
     // the cover letter — so just "for <company>" and the rule.
-    p.text(VALUE_X - 20.0, Y_SIG_FOR, &format!("for {}", s.company_name), BODY, 9.0, BLACK);
+    p.text(VALUE_X - 20.0, Y_SIG_FOR, &format!("for {}", s.company_name), BODY, FS, BLACK);
     p.hline(VALUE_X - 20.0, R, Y_SIG_LINE, 0.4, BLACK);
-    p.text(L, Y_EOE, "E & O E", BODY_B, 9.0, BLACK);
+    p.text(L, Y_EOE, "E & O E", BODY, FS, BLACK);
 
     // --- accountant-only: row 52 marker, then rows 55-61 -----------------
     if copy == Copy::Accountant {

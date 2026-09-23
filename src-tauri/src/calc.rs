@@ -23,6 +23,48 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Container and breakbulk cargo print an identical customer copy — same
+/// $/M-Ton formula, same layout — but the accounts copy's cost lines don't
+/// carry over: most of the default rate card is priced per container, which
+/// breakbulk cargo never has any of. Each shipment type gets its own editable
+/// rate card in Settings so the accountant's real cost structure for each can
+/// be entered once, rather than the app guessing which lines apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ShipmentType {
+    Container,
+    Breakbulk,
+}
+
+impl Default for ShipmentType {
+    fn default() -> Self {
+        ShipmentType::Container
+    }
+}
+
+impl ShipmentType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShipmentType::Container => "CONTAINER",
+            ShipmentType::Breakbulk => "BREAKBULK",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ShipmentType::Container => "Container",
+            ShipmentType::Breakbulk => "Breakbulk",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "BREAKBULK" => ShipmentType::Breakbulk,
+            _ => ShipmentType::Container,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CostCategory {

@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { api, errorMessage } from '../api'
 import type { Store } from '../store'
-import type { CostLine, DebitNote, DebitNoteInput, Preset, Preview } from '../types'
+import type { CostLine, DebitNote, DebitNoteInput, Preset, Preview, ShipmentType } from '../types'
 import { CATEGORY_LABEL, COST_CATEGORIES } from '../types'
 import {
   Chevron,
@@ -46,14 +46,18 @@ const NEEDS_FILLING: React.CSSProperties = {
   borderColor: 'rgba(224,82,82,0.65)',
 }
 
-/** Fields a preset fills in and the user should review. */
-const PRESET_FIELDS = ['buyerName', 'destination'] as const
+/** Fields a preset fills in and the user should review — a buyer+destination
+ * lane usually repeats these month to month, but each is still exactly the
+ * kind of thing that quietly changes (box count drifting from 16 to 15, a
+ * voyage number rolling over), so none of them are copied silently. */
+const PRESET_FIELDS = ['buyerName', 'destination', 'boxes', 'oceanVessel', 'oceanVoyage'] as const
 
 /** Fields that are always blank on a new note, however good the preset is —
  * and, per the fix log, the ones that should be flagged red after a preset
- * is applied, since a copied value here is very unlikely to still be right. */
+ * is applied, since a copied value here is very unlikely to still be right.
+ * The feeder vessel/voyage/arrival date and B/L number are handled instead by
+ * the feeder-match lookup below, which fires off what's typed, not the preset. */
 const ALWAYS_BLANK = [
-  'boxes',
   'feederVessel',
   'feederArrivalDate',
   'blNumber',
@@ -62,8 +66,6 @@ const ALWAYS_BLANK = [
   'siNumber',
   'contractNo',
   'pNumber',
-  'oceanVessel',
-  'oceanVoyage',
 ] as const
 
 type Errors = Partial<Record<keyof DebitNoteInput | 'dnSeq', string>>
@@ -83,6 +85,7 @@ function emptyInput(): DebitNoteInput {
     boxesPerContainer: 16,
     mtPerContainer: 20.16,
     productDesc: '',
+    shipmentType: 'CONTAINER',
     feederVessel: '',
     feederVoyage: '',
     feederArrivalDate: '',
@@ -115,6 +118,7 @@ export function inputFromNote(n: DebitNote): DebitNoteInput {
     boxesPerContainer: n.boxesPerContainer,
     mtPerContainer: n.mtPerContainer,
     productDesc: n.productDesc,
+    shipmentType: n.shipmentType,
     feederVessel: n.feederVessel,
     feederVoyage: n.feederVoyage,
     feederArrivalDate: n.feederArrivalDate,
@@ -198,7 +202,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
 
   // Live figures, priced by the same Rust that will store them.
   const cargoKey = useDebounced(
-    `${form.boxes}|${form.boxesPerContainer}|${form.mtPerContainer}|${form.ratePerMt}|${costs ? JSON.stringify(costs) : ''}`,
+    `${form.boxes}|${form.boxesPerContainer}|${form.mtPerContainer}|${form.ratePerMt}|${form.shipmentType}|${costs ? JSON.stringify(costs) : ''}`,
   )
   useEffect(() => {
     let cancelled = false
@@ -208,6 +212,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
         boxesPerContainer: form.boxesPerContainer,
         mtPerContainer: form.mtPerContainer,
         ratePerMt: form.ratePerMt,
+        shipmentType: form.shipmentType,
         ...(costs ? { costs } : {}),
       })
       .then((p) => {
@@ -221,6 +226,36 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cargoKey])
+
+  // The same feeder call is often billed to more than one buyer — once the
+  // vessel and voyage match an existing note, offer back its arrival date and
+  // the vessel/voyage half of its B/L number rather than making this one
+  // retype them. Never overwrites something already typed.
+  const feederKey = useDebounced(`${form.feederVessel}|${form.feederVoyage}`)
+  useEffect(() => {
+    if (!form.feederVessel.trim() || !form.feederVoyage.trim()) return
+    let cancelled = false
+    api
+      .feederMatch(form.feederVessel, form.feederVoyage, editing?.id)
+      .then((match) => {
+        if (cancelled || !match) return
+        const filled: string[] = []
+        if (!form.feederArrivalDate.trim()) filled.push('feederArrivalDate')
+        if (!form.blNumber.trim() && match.blPrefix) filled.push('blNumber')
+        if (!filled.length) return
+        setForm((f) => ({
+          ...f,
+          ...(filled.includes('feederArrivalDate') ? { feederArrivalDate: match.feederArrivalDate } : {}),
+          ...(filled.includes('blNumber') ? { blNumber: `${match.blPrefix}-` } : {}),
+        }))
+        setHighlighted((h) => [...new Set([...h, ...filled])])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feederKey, editing?.id])
 
   const composedDn = autoNumber
     ? suggested
@@ -262,9 +297,17 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
       boxesPerContainer: p.boxesPerContainer || f.boxesPerContainer,
       mtPerContainer: p.mtPerContainer || f.mtPerContainer,
       customerId: p.customerId ?? f.customerId,
+      // Boxes and the outward vessel/voyage are copied too now — the client
+      // asked for a head start on these since a lane usually repeats them —
+      // but all three are flagged amber below for the same reason SI/Contract
+      // No. stay blank: they're exactly the fields most likely to have
+      // quietly changed since last time.
+      boxes: p.boxes || f.boxes,
+      oceanVessel: p.oceanVessel || f.oceanVessel,
+      oceanVoyage: p.oceanVoyage || f.oceanVoyage,
       // SI/Contract No. are per-shipment references, not per-buyer — a copied
       // one is more likely stale than right, so the preset leaves them blank.
-      // Vessel and cargo details belong to the shipment too, never the preset.
+      // The feeder vessel/voyage belong to the shipment too, never the preset.
     }))
     setHighlighted([...PRESET_FIELDS])
     setBlanks([...ALWAYS_BLANK])
@@ -333,6 +376,9 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
           boxesPerContainer: form.boxesPerContainer,
           mtPerContainer: form.mtPerContainer,
           contractNo: form.contractNo,
+          boxes: form.boxes,
+          oceanVessel: form.oceanVessel,
+          oceanVoyage: form.oceanVoyage,
         })
         onSaved(created.id, created.dnNumber)
       }
@@ -465,6 +511,22 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
           />
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-8">
+            {/* Shipment Type — standalone: it picks the accountant's cost
+                card (below) without touching the customer-facing charge. */}
+            <Section title="Shipment Type" subtitle="Picks the accountant's cost card, below — the printed charge is the same either way">
+              <select
+                value={form.shipmentType}
+                onChange={(e) => {
+                  set('shipmentType', e.target.value as ShipmentType)
+                  setCosts(null)
+                }}
+                style={{ maxWidth: 220 }}
+              >
+                <option value="CONTAINER">Container</option>
+                <option value="BREAKBULK">Breakbulk</option>
+              </select>
+            </Section>
+
             {/* Parties */}
             <Section title="Parties" subtitle="Who is billed, and whose cargo it is">
               <div className="grid grid-cols-2 gap-x-6 gap-y-5">
@@ -803,6 +865,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
               preview={preview}
               costs={costs}
               currency={currency}
+              shipmentType={form.shipmentType}
               onEdit={(lines) => setCosts(lines)}
               onReset={() => setCosts(null)}
             />
@@ -878,12 +941,14 @@ function CostingSection({
   preview,
   costs,
   currency,
+  shipmentType,
   onEdit,
   onReset,
 }: {
   preview: Preview | null
   costs: CostLine[] | null
   currency: string
+  shipmentType: ShipmentType
   onEdit: (lines: CostLine[]) => void
   onReset: () => void
 }) {
@@ -894,10 +959,15 @@ function CostingSection({
     onEdit(lines.map((l) => (l.code === code && l.category === category ? { ...l, rate } : l)))
   }
 
+  const cardLabel = shipmentType === 'BREAKBULK' ? 'Breakbulk' : 'Container'
   return (
     <Section
       title="Costing"
-      subtitle={costs ? 'Rates overridden for this note only — the card in Settings is untouched' : undefined}
+      subtitle={
+        costs
+          ? 'Rates overridden for this note only — the card in Settings is untouched'
+          : `Priced from the ${cardLabel} rate card`
+      }
       right={
         <div className="flex items-center gap-2">
           {costs && (

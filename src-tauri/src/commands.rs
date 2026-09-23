@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::calc::{
-    self, CargoInput, CostContext, CostLine, CostSummary, compute_cargo, compute_costs,
+    self, CargoInput, CostContext, CostLine, CostSummary, ShipmentType, compute_cargo, compute_costs,
 };
 use crate::db::Db;
 use crate::error::{AppError, Result};
@@ -74,15 +74,19 @@ pub fn delete_customer(state: State<'_, AppState>, id: i64) -> Result<()> {
 // ----- rate card ------------------------------------------------------------
 
 #[tauri::command]
-pub fn get_rate_card(state: State<'_, AppState>) -> Result<Vec<RateDefault>> {
-    state.db().rate_card()
+pub fn get_rate_card(state: State<'_, AppState>, shipment_type: ShipmentType) -> Result<Vec<RateDefault>> {
+    state.db().rate_card(shipment_type)
 }
 
 #[tauri::command]
-pub fn save_rate_card(state: State<'_, AppState>, lines: Vec<RateDefault>) -> Result<Vec<RateDefault>> {
+pub fn save_rate_card(
+    state: State<'_, AppState>,
+    shipment_type: ShipmentType,
+    lines: Vec<RateDefault>,
+) -> Result<Vec<RateDefault>> {
     let mut db = state.db();
-    db.save_rate_card(&lines)?;
-    db.rate_card()
+    db.save_rate_card(shipment_type, &lines)?;
+    db.rate_card(shipment_type)
 }
 
 // ----- presets --------------------------------------------------------------
@@ -122,6 +126,18 @@ pub fn get_note(state: State<'_, AppState>, id: i64) -> Result<DebitNote> {
 pub fn next_dn_number(state: State<'_, AppState>, year_month: String) -> Result<String> {
     let n = state.db().next_running_no(&year_month)?;
     Ok(format!("DN{year_month}-{n:02}"))
+}
+
+/// Looked up as the feeder vessel/voyage fields are typed, not tied to a
+/// preset — the same feeder call is often billed to more than one buyer.
+#[tauri::command]
+pub fn feeder_match(
+    state: State<'_, AppState>,
+    feeder_vessel: String,
+    feeder_voyage: String,
+    exclude_id: Option<i64>,
+) -> Result<Option<FeederMatch>> {
+    state.db().feeder_match(&feeder_vessel, &feeder_voyage, exclude_id)
 }
 
 #[tauri::command]
@@ -171,6 +187,8 @@ pub struct PreviewInput {
     pub mt_per_container: f64,
     pub rate_per_mt: f64,
     #[serde(default)]
+    pub shipment_type: ShipmentType,
+    #[serde(default)]
     pub costs: Option<Vec<CostLine>>,
 }
 
@@ -186,7 +204,7 @@ pub fn preview_figures(state: State<'_, AppState>, input: PreviewInput) -> Resul
         Some(c) => c,
         None => state
             .db()
-            .rate_card()?
+            .rate_card(input.shipment_type)?
             .into_iter()
             .filter(|r| r.active)
             .map(|r| CostLine {
@@ -248,7 +266,8 @@ pub fn filing_report_pdf(state: State<'_, AppState>, year_month: String) -> Resu
 pub fn cover_letter_pdf(
     state: State<'_, AppState>,
     customer_id: i64,
-    year_month: String,
+    from_year_month: String,
+    to_year_month: String,
     attn_name: String,
     letter_date: Option<String>,
 ) -> Result<String> {
@@ -264,16 +283,84 @@ pub fn cover_letter_pdf(
     settings.cover_letter_attn_name = attn_name.clone();
     db.save_settings(&settings)?;
 
-    let numbers = db.dn_numbers_for(customer_id, std::slice::from_ref(&year_month))?;
+    let months = months_in_range(&from_year_month, &to_year_month);
+    let numbers = db.dn_numbers_for(customer_id, &months)?;
     let date = letter_date.unwrap_or_else(today);
     Ok(b64(cover_letter::render(&cover_letter::CoverLetter {
         customer: &customer,
         settings: &settings,
         letter_date: &date,
         attn_name: &attn_name,
-        year_month: &year_month,
         dn_numbers: numbers,
     })))
+}
+
+/// Every `YYYYMM` from `from` to `to` inclusive, in order, swapping the two if
+/// given in reverse. A cover letter used to be pinned to a single month; the
+/// client asked for the ability to enclose a run of months in one letter
+/// again, with the printed list still grouped one column per month (done in
+/// `cover_letter::render` by reading the month back out of each DN number).
+fn months_in_range(from: &str, to: &str) -> Vec<String> {
+    fn parse(ym: &str) -> Option<(i32, u32)> {
+        if ym.len() != 6 {
+            return None;
+        }
+        let y = ym[0..4].parse().ok()?;
+        let m: u32 = ym[4..6].parse().ok()?;
+        if !(1..=12).contains(&m) {
+            return None;
+        }
+        Some((y, m))
+    }
+    let (Some(a), Some(b)) = (parse(from), parse(to)) else {
+        return vec![from.to_string()];
+    };
+    let (mut y, mut m) = a.min(b);
+    let end = a.max(b);
+    let mut out = Vec::new();
+    loop {
+        out.push(format!("{y:04}{m:02}"));
+        if (y, m) == end {
+            break;
+        }
+        m += 1;
+        if m > 12 {
+            m = 1;
+            y += 1;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod months_in_range_tests {
+    use super::months_in_range;
+
+    #[test]
+    fn a_single_month_is_just_itself() {
+        assert_eq!(months_in_range("202609", "202609"), vec!["202609"]);
+    }
+
+    #[test]
+    fn spans_a_year_boundary() {
+        assert_eq!(
+            months_in_range("202511", "202602"),
+            vec!["202511", "202512", "202601", "202602"]
+        );
+    }
+
+    #[test]
+    fn a_reversed_range_still_reads_forward() {
+        assert_eq!(
+            months_in_range("202609", "202508"),
+            months_in_range("202508", "202609")
+        );
+    }
+
+    #[test]
+    fn malformed_input_falls_back_to_the_first_month_alone() {
+        assert_eq!(months_in_range("bad", "202609"), vec!["bad"]);
+    }
 }
 
 /// Write a PDF the UI already holds to a path the user chose in a save dialog.

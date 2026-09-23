@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { errorMessage } from '../api'
 import type { Store } from '../store'
-import type { Customer, RateDefault, Settings } from '../types'
+import type { Customer, RateDefault, Settings, ShipmentType } from '../types'
 import { BASIS_LABEL, CATEGORY_LABEL, COST_CATEGORIES, emptyCustomer } from '../types'
 import type { CostBasis, CostCategory } from '../types'
 import { Icon, fmt2 } from '../ui'
@@ -301,7 +301,39 @@ function DefaultsTab({ store, notify }: Props) {
 }
 
 function RatesTab({ store, notify }: Props) {
-  const d = useDraft<RateDefault[]>(store.rateCard, store.saveRateCard, notify)
+  const [shipmentType, setShipmentType] = useState<ShipmentType>('CONTAINER')
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 pt-4">
+        <div className="flex rounded overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          {(['CONTAINER', 'BREAKBULK'] as ShipmentType[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setShipmentType(t)}
+              className="flex-1 py-2 text-xs font-semibold uppercase tracking-widest"
+              style={{
+                background: shipmentType === t ? 'color-mix(in srgb, var(--primary) 14%, var(--secondary))' : 'var(--secondary)',
+                color: shipmentType === t ? 'var(--primary)' : 'var(--muted-foreground)',
+              }}
+            >
+              {t === 'CONTAINER' ? 'Container' : 'Breakbulk'}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs leading-relaxed mt-2" style={{ color: 'var(--muted-foreground)' }}>
+          Same customer-facing charge either way — this card only feeds the accountant copy's cost
+          block, so container and breakbulk shipments keep entirely separate cost lines.
+        </p>
+      </div>
+      {/* Remounted per tab so an unsaved edit in one card never bleeds into the other. */}
+      <RateCardEditor key={shipmentType} shipmentType={shipmentType} store={store} notify={notify} />
+    </div>
+  )
+}
+
+function RateCardEditor({ shipmentType, store, notify }: Props & { shipmentType: ShipmentType }) {
+  const save = (lines: RateDefault[]) => store.saveRateCard(shipmentType, lines)
+  const d = useDraft<RateDefault[]>(store.rateCards[shipmentType], save, notify)
   if (!d.draft) return null
   const lines = d.draft
 
@@ -313,6 +345,7 @@ function RatesTab({ store, notify }: Props) {
       ...lines,
       {
         id: 0,
+        shipmentType,
         category,
         code: '',
         label: '',
@@ -327,8 +360,9 @@ function RatesTab({ store, notify }: Props) {
     <div className="flex flex-col h-full">
       <div className="flex-1 px-4 py-5 flex flex-col gap-5">
         <p className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
-          Copied onto each new debit note, where it can still be overridden. Changing a rate here
-          does not touch notes already created.
+          Copied onto each new {shipmentType === 'CONTAINER' ? 'container' : 'breakbulk'} debit
+          note, where it can still be overridden. Changing a rate here does not touch notes already
+          created.
         </p>
 
         {COST_CATEGORIES.map((cat) => (

@@ -24,6 +24,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // One file next to the app's other data. Backing the app up means
             // copying this one path, which is what the office was told to do.
@@ -47,6 +49,7 @@ pub fn run() {
             commands::list_notes,
             commands::get_note,
             commands::next_dn_number,
+            commands::feeder_match,
             commands::create_note,
             commands::update_note,
             commands::delete_note,

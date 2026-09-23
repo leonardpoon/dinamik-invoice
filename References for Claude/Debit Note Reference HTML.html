@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Debit Note - DINAMIK SHIPPING PTE LTD</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #f0f2f5;
+      font-family: Tahoma, Arial, sans-serif;
+      font-size: 13.33px; /* 10pt */
+      color: #000;
+      line-height: 1.35;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      min-height: 297mm;
+      padding: 20mm 18mm;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
+
+    @media print {
+      body {
+        background: none;
+        padding: 0;
+      }
+      .sheet {
+        box-shadow: none;
+        width: 100%;
+        min-height: auto;
+        padding: 15mm 15mm;
+      }
+    }
+
+    /* Company Header */
+    .company-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .company-name {
+      font-size: 21.33px; /* 16pt */
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .company-details,
+    .company-reg {
+      font-size: 12px; /* 9pt */
+      color: #111;
+      line-height: 1.4;
+    }
+
+    /* Recipient & Meta Section */
+    .meta-grid {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-top: 18px;
+      margin-bottom: 12px;
+    }
+
+    .recipient-info {
+      line-height: 1.35;
+    }
+
+    .recipient-info .company-client {
+      font-weight: bold;
+    }
+
+    .doc-meta {
+      width: 230px;
+    }
+
+    .doc-title {
+      font-size: 16px; /* 12pt */
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .meta-row {
+      display: flex;
+      line-height: 1.35;
+    }
+
+    .meta-label {
+      width: 65px;
+    }
+
+    /* Dividers */
+    .divider-solid {
+      border: none;
+      border-top: 1.5px solid #000;
+      margin: 8px 0 12px 0;
+    }
+
+    .divider-thin {
+      border: none;
+      border-top: 1px solid #000;
+      margin: 10px 0;
+    }
+
+    /* Shipment Details */
+    .shipment-details {
+      margin-bottom: 8px;
+    }
+
+    .detail-row {
+      display: flex;
+      line-height: 1.35;
+    }
+
+    .col-left {
+      width: 48%;
+    }
+
+    .col-right {
+      width: 52%;
+      display: flex;
+    }
+
+    /* Calculation Table */
+    .calc-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      margin-bottom: 18px;
+    }
+
+    .calc-table td {
+      padding: 3px 0;
+      vertical-align: bottom;
+    }
+
+    .td-desc {
+      width: 45%;
+    }
+
+    .td-rate {
+      width: 35%;
+    }
+
+    .td-curr {
+      width: 5%;
+      text-align: right;
+      padding-right: 4px;
+    }
+
+    .td-amount {
+      width: 15%;
+      text-align: right;
+    }
+
+    .border-top-thin {
+      border-top: 1px solid #000;
+    }
+
+    .border-bottom-double {
+      border-bottom: 3px double #000;
+    }
+
+    /* Amount in Words */
+    .amount-words-row {
+      display: flex;
+      gap: 20px;
+      margin-top: 14px;
+      margin-bottom: 22px;
+    }
+
+    .amount-words-label {
+      min-width: 130px;
+    }
+
+    /* Payment Instructions */
+    .payment-terms {
+      margin-top: 10px;
+      line-height: 1.4;
+    }
+
+    /* Sign-off & Footer */
+    .footer-section {
+      margin-top: 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .eoe {
+      font-size: 13.33px;
+    }
+
+    .signature-block {
+      text-align: center;
+      width: 260px;
+    }
+
+    .signature-dots {
+      margin-top: 55px;
+      letter-spacing: 2px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="sheet">
+    <!-- Letterhead -->
+    <header class="company-header">
+      <div class="company-name">DINAMIK SHIPPING PTE LTD</div>
+      <div class="company-details">
+        138 Cecil Street #09-03, Cecil Court, Singapore 069538 &nbsp; Tel: (65) 6222 2811 &nbsp; Fax: (65) 6222 2155
+      </div>
+      <div class="company-reg">Company Registration No. 200403109N</div>
+    </header>
+
+    <!-- Recipient & Meta -->
+    <section class="meta-grid">
+      <div class="recipient-info">
+        <div class="company-client">Sabah Rubber Industry Board</div>
+        <div>Level 3, Wisma Pertanian Sabah</div>
+        <div>Jalan Tasik</div>
+        <div>Luyang (off Jalan Maktab Gaya)</div>
+        <div>Kota Kinabalu, Sabah</div>
+        <div>East Malaysia</div>
+      </div>
+
+      <div class="doc-meta">
+        <div class="doc-title">Debit Note</div>
+        <div class="meta-row">
+          <span class="meta-label">No. &nbsp;:</span>
+          <span>DN202609-xx</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Date &nbsp;:</span>
+          <span>29 Sep 2026</span>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider-solid" />
+
+    <!-- Shipment Metadata -->
+    <section class="shipment-details">
+      <div class="detail-row">
+        <div class="col-left">Your Invoice No. 132xx</div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">Bridgestone Singapore Pte Ltd</div>
+        <div class="col-right">
+          <span style="width: 120px;">Contract No.</span>
+          <span>283230</span>
+        </div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">
+          <span>90</span>
+          <span style="margin-left: 12px;">Metal Boxes (MB5)</span>
+        </div>
+        <div class="col-right">
+          <span style="width: 120px;">113.40 &nbsp; M/Tons</span>
+          <span>SMR 20 Rubber</span>
+        </div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">
+          <span>Ex Jade Star</span>
+          <span style="margin-left: 55px;">Voy 2610W &nbsp;&nbsp; Arrd</span>
+        </div>
+        <div class="col-right">
+          <span>22 Sep 2026</span>
+        </div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">B/L No. JJST2610W-BKI01</div>
+        <div class="col-right">
+          <span>(179/26 &nbsp; Tuaran)</span>
+        </div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">Shipped per Zim Mount Vinson Voy 12E</div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">To Savannah, USA</div>
+      </div>
+
+      <div class="detail-row">
+        <div class="col-left">
+          <span>B/L dated</span>
+          <span style="margin-left: 36px;">29 Sep 2026</span>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider-thin" />
+
+    <!-- Calculations -->
+    <table class="calc-table">
+      <tbody>
+        <tr>
+          <td class="td-desc">Transhipment Charge</td>
+          <td class="td-rate">@ S$ &nbsp; 54 &nbsp; per M/Ton</td>
+          <td class="td-curr">S$</td>
+          <td class="td-amount">6,123.60</td>
+        </tr>
+        <tr style="height: 38px;">
+          <td></td>
+          <td></td>
+          <td class="border-top-thin"></td>
+          <td class="border-top-thin"></td>
+        </tr>
+        <tr>
+          <td></td>
+          <td></td>
+          <td class="td-curr border-bottom-double">S$</td>
+          <td class="td-amount border-bottom-double">6,123.60</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Amount in Words -->
+    <div class="amount-words-row">
+      <div class="amount-words-label">Singapore Dollars</div>
+      <div>Six Thousand One Hundred Twenty Three and cents Sixty only</div>
+    </div>
+
+    <!-- Banking Instructions -->
+    <div class="payment-terms">
+      <div>Payment to be made to DINAMIK SHIPPING PTE LTD by Telegraphic Transfer to our account</div>
+      <div>No. 651-869620-001 with OCBC Bank (Singapore), MBFC Branch, Swift Code: OCBCSGSG</div>
+    </div>
+
+    <!-- Sign-off -->
+    <footer class="footer-section">
+      <div class="eoe">E &amp; O E</div>
+      <div class="signature-block">
+        <div>for DINAMIK SHIPPING PTE LTD</div>
+        <div class="signature-dots">…………………………………………………………</div>
+      </div>
+    </footer>
+  </div>
+
+</body>
+</html>

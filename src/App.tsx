@@ -14,6 +14,7 @@ import Filing from './components/Filing'
 import History from './components/History'
 import NoteForm from './components/NoteForm'
 import SettingsPanel from './components/SettingsPanel'
+import UpdateChecker from './components/UpdateChecker'
 import { useStore } from './store'
 import type { DebitNote, DebitNoteSummary } from './types'
 import { ConfirmDialog, Icon, Spinner, Toast, currentYearMonth } from './ui'
@@ -165,6 +166,7 @@ export default function App() {
         </nav>
 
         <div className="flex items-center gap-3 shrink-0">
+          <UpdateChecker notify={notify} />
           <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)' }}>
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#4caf7a' }} />
             {store.notes.length} records

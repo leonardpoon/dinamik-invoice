@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::calc::{CostBasis, CostCategory, CostLine};
+use crate::calc::{CostBasis, CostCategory, CostLine, ShipmentType};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +110,8 @@ impl Customer {
 pub struct RateDefault {
     #[serde(default)]
     pub id: i64,
+    #[serde(default)]
+    pub shipment_type: ShipmentType,
     pub category: CostCategory,
     pub code: String,
     #[serde(default)]
@@ -150,6 +152,29 @@ pub struct Preset {
     pub mt_per_container: f64,
     #[serde(default)]
     pub contract_no: String,
+    /// Copied onto a new note the same way product/packing already are — a
+    /// buyer+destination lane usually ships the same box count month to
+    /// month, so it's worth a head start even though it's flagged for review.
+    #[serde(default)]
+    pub boxes: f64,
+    #[serde(default)]
+    pub ocean_vessel: String,
+    #[serde(default)]
+    pub ocean_voyage: String,
+}
+
+/// A prior note's feeder call, offered back when a new note names the same
+/// vessel and voyage — the arrival date and the vessel/voyage half of the B/L
+/// number are shared by every buyer on that call, so retyping them is pure
+/// friction. See [`crate::db::Db::feeder_match`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeederMatch {
+    pub feeder_arrival_date: String,
+    /// The B/L number's vessel/voyage half, e.g. `"JJST2610W"` from
+    /// `"JJST2610W-BKI01"` — the part after the dash is a per-buyer
+    /// consignment reference and is never carried over.
+    pub bl_prefix: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +228,10 @@ pub struct DebitNoteInput {
     pub mt_per_container: f64,
     #[serde(default)]
     pub product_desc: String,
+    /// Picks which of the two rate cards seeds this note's accountant-only
+    /// cost lines — the customer-facing charge is identical either way.
+    #[serde(default)]
+    pub shipment_type: ShipmentType,
 
     #[serde(default)]
     pub feeder_vessel: String,
@@ -268,6 +297,7 @@ pub struct DebitNote {
     pub containers: f64,
     pub tonnage: f64,
     pub product_desc: String,
+    pub shipment_type: ShipmentType,
 
     pub feeder_vessel: String,
     pub feeder_voyage: String,
@@ -322,6 +352,7 @@ pub struct DebitNoteSummary {
     pub ocean_vessel: String,
     pub destination: String,
     pub product_desc: String,
+    pub shipment_type: ShipmentType,
     pub boxes: f64,
     pub containers: f64,
     pub tonnage: f64,

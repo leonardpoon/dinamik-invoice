@@ -14,6 +14,7 @@ import type {
   Preset,
   RateDefault,
   Settings,
+  ShipmentType,
 } from './types'
 
 export interface Store {
@@ -22,7 +23,9 @@ export interface Store {
 
   settings: Settings | null
   customers: Customer[]
-  rateCard: RateDefault[]
+  /** One card per shipment type — same customer copy either way, but
+   * independently editable accountant-only costs. */
+  rateCards: Record<ShipmentType, RateDefault[]>
   presets: Preset[]
   notes: DebitNoteSummary[]
 
@@ -30,7 +33,7 @@ export interface Store {
   saveSettings: (s: Settings) => Promise<void>
   saveCustomer: (c: Customer) => Promise<number>
   deleteCustomer: (id: number) => Promise<void>
-  saveRateCard: (lines: RateDefault[]) => Promise<void>
+  saveRateCard: (shipmentType: ShipmentType, lines: RateDefault[]) => Promise<void>
   savePreset: (p: Preset) => Promise<void>
   deletePreset: (id: number) => Promise<void>
   createNote: (input: DebitNoteInput) => Promise<DebitNoteSummary>
@@ -44,22 +47,26 @@ export function useStore(): Store {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [rateCard, setRateCard] = useState<RateDefault[]>([])
+  const [rateCards, setRateCards] = useState<Record<ShipmentType, RateDefault[]>>({
+    CONTAINER: [],
+    BREAKBULK: [],
+  })
   const [presets, setPresets] = useState<Preset[]>([])
   const [notes, setNotes] = useState<DebitNoteSummary[]>([])
 
   const reload = useCallback(async () => {
     try {
-      const [s, c, r, p, n] = await Promise.all([
+      const [s, c, container, breakbulk, p, n] = await Promise.all([
         api.getSettings(),
         api.listCustomers(),
-        api.getRateCard(),
+        api.getRateCard('CONTAINER'),
+        api.getRateCard('BREAKBULK'),
         api.listPresets(),
         api.listNotes(),
       ])
       setSettings(s)
       setCustomers(c)
-      setRateCard(r)
+      setRateCards({ CONTAINER: container, BREAKBULK: breakbulk })
       setPresets(p)
       setNotes(n)
       setLoadError(null)
@@ -83,7 +90,7 @@ export function useStore(): Store {
     loadError,
     settings,
     customers,
-    rateCard,
+    rateCards,
     presets,
     notes,
 
@@ -106,8 +113,9 @@ export function useStore(): Store {
       setCustomers(await api.listCustomers())
     },
 
-    saveRateCard: async (lines) => {
-      setRateCard(await api.saveRateCard(lines))
+    saveRateCard: async (shipmentType, lines) => {
+      const saved = await api.saveRateCard(shipmentType, lines)
+      setRateCards((prev) => ({ ...prev, [shipmentType]: saved }))
     },
 
     savePreset: async (p) => {

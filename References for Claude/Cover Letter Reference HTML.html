@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transmittal Letter - DINAMIK SHIPPING PTE LTD</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #f0f2f5;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13.33px; /* 10pt */
+      color: #000;
+      line-height: 1.4;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      min-height: 297mm;
+      padding: 25mm 25mm;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
+
+    @media print {
+      body {
+        background: none;
+        padding: 0;
+      }
+      .sheet {
+        box-shadow: none;
+        width: 100%;
+        min-height: auto;
+        padding: 20mm 20mm;
+      }
+    }
+
+    /* Date */
+    .date-field {
+      margin-bottom: 22px;
+    }
+
+    /* Recipient Address */
+    .recipient-block {
+      line-height: 1.35;
+      margin-bottom: 20px;
+    }
+
+    /* Attn Line */
+    .attn-line {
+      margin-bottom: 22px;
+    }
+
+    /* Body Text */
+    .intro-text {
+      margin-bottom: 24px;
+    }
+
+    /* Two-Column Debit Note Grid */
+    .dn-grid {
+      display: flex;
+      gap: 75px;
+      margin-bottom: 120px;
+      padding-left: 2px;
+    }
+
+    .dn-column {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* Sign-off Block */
+    .sign-off {
+      margin-top: 30px;
+    }
+
+    .closing {
+      margin-bottom: 4px;
+    }
+
+    .sign-company {
+      font-weight: bold;
+      margin-bottom: 75px;
+    }
+
+    .sign-name {
+      margin-bottom: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="sheet">
+    <!-- Date -->
+    <div class="date-field">Date: </div>
+
+    <!-- Recipient Block -->
+    <div class="recipient-block">
+      <div>SABAH RUBBER INDUSTRY BOARD</div>
+      <div>LEVEL 3, WISMA PERTANIAN SABAH,</div>
+      <div>JALAN TASIK,</div>
+      <div>LUYANG (OFF JALAN MAKTAB GAYA)</div>
+      <div>KOTA KINABALU, SABAH,</div>
+      <div>EAST MALAYSIA</div>
+    </div>
+
+    <!-- Attention -->
+    <div class="attn-line">Attn: Ms Chia Ching Lian</div>
+
+    <!-- Intro Text -->
+    <div class="intro-text">
+      We enclose the following Debit notes and will appreciate your early settlement.
+    </div>
+
+    <!-- 2 Columns of Debit Notes -->
+    <div class="dn-grid">
+      <!-- August Series -->
+      <div class="dn-column">
+        <div>DN202508-11</div>
+        <div>DN202508-12</div>
+        <div>DN202508-13</div>
+        <div>DN202508-14</div>
+        <div>DN202508-15</div>
+        <div>DN202508-16</div>
+      </div>
+
+      <!-- September Series -->
+      <div class="dn-column">
+        <div>DN202509-01</div>
+        <div>DN202509-02</div>
+        <div>DN202509-03</div>
+        <div>DN202509-04</div>
+        <div>DN202509-05</div>
+        <div>DN202509-06</div>
+        <div>DN202509-07</div>
+        <div>DN202509-08</div>
+        <div>DN202509-09</div>
+        <div>DN202509-10</div>
+        <div>DN202509-11</div>
+        <div>DN202509-12</div>
+        <div>DN202509-13</div>
+      </div>
+    </div>
+
+    <!-- Sign-off -->
+    <div class="sign-off">
+      <div class="closing">Yours Faithfully,</div>
+      <div class="sign-company">DINAMIK SHIPPING PTE LTD</div>
+      <div class="sign-name">Deanna Lim</div>
+      <div>General Manager</div>
+    </div>
+  </div>
+
+</body>
+</html>

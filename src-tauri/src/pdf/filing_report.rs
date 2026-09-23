@@ -138,6 +138,7 @@ mod tests {
             ocean_vessel: "Zim Mount Vinson".into(),
             destination: "Savannah, USA".into(),
             product_desc: "SMR 20 Rubber".into(),
+            shipment_type: crate::calc::ShipmentType::Container,
             boxes: 90.0,
             containers: 5.625,
             tonnage: 113.4,
