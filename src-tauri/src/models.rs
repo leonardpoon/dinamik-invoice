@@ -259,6 +259,17 @@ pub struct FeederMatch {
     pub bl_prefix: String,
 }
 
+/// A prior note's outward call, offered back when the outward vessel + voyage
+/// match — the same sailing carries every buyer on it to the same place, so
+/// the B/L date and destination are shared the same way the feeder's arrival
+/// date and B/L prefix are. See [`crate::db::Db::outward_match`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutwardMatch {
+    pub bl_date: String,
+    pub destination: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NoteStatus {

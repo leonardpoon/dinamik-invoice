@@ -81,6 +81,7 @@ function Compose({ store, notify, mode, setMode }: Props & { mode: Mode; setMode
   const [eligibleLoading, setEligibleLoading] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
+  const [generated, setGenerated] = useState<{ b64: string; filename: string; customerName: string; count: number } | null>(null)
   const lastCustomerRef = useRef(0)
 
   // Pick up the sticky customer + addressee the moment Settings loads, but
@@ -169,18 +170,25 @@ function Compose({ store, notify, mode, setMode }: Props & { mode: Mode; setMode
       const ids = [...selectedIds]
       const b64 = await api.saveCoverLetter(customerId, ids, attnName, letterDate)
       const slug = customer.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()
-      const saved = await savePdf(b64, `cover-letter-${slug}-${letterDate}.pdf`)
-      notify(
-        `Cover letter generated — ${ids.length} debit note${ids.length === 1 ? '' : 's'} enclosed` +
-          (saved ? '' : ' (not saved to disk — it can still be downloaded from History)'),
-        'ok',
-      )
+      setGenerated({ b64, filename: `cover-letter-${slug}-${letterDate}.pdf`, customerName: customer.name, count: ids.length })
       setSelectedIds(new Set())
       setEligibleNotes(await api.coverLetterEligibleNotes(customerId))
     } catch (e) {
       notify(errorMessage(e), 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleDownloadGenerated() {
+    if (!generated) return
+    try {
+      const saved = await savePdf(generated.b64, generated.filename)
+      if (saved) notify(`${generated.filename} saved`, 'ok')
+    } catch (e) {
+      notify(errorMessage(e), 'error')
+    } finally {
+      setGenerated(null)
     }
   }
 
@@ -395,6 +403,80 @@ function Compose({ store, notify, mode, setMode }: Props & { mode: Mode; setMode
               title="Cover letter preview"
             />
           )}
+        </div>
+      </div>
+
+      {generated && (
+        <GeneratedModal
+          customerName={generated.customerName}
+          count={generated.count}
+          onDownload={() => void handleDownloadGenerated()}
+          onDismiss={() => setGenerated(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The same "success" popup the debit note form shows — the letter is
+ * already saved and sitting in History the moment this appears; downloading
+ * a copy to disk is a deliberate extra step, not something sprung on the
+ * user the instant the letter is generated. */
+function GeneratedModal({
+  customerName,
+  count,
+  onDownload,
+  onDismiss,
+}: {
+  customerName: string
+  count: number
+  onDownload: () => void
+  onDismiss: () => void
+}) {
+  // Disappears on its own after 5 seconds, same as the debit note popup —
+  // dismissing is the passive default; downloading is a deliberate click.
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 5000)
+    return () => clearTimeout(t)
+  }, [onDismiss])
+
+  return (
+    <div
+      className="fixed inset-0 flex items-center justify-center z-50"
+      style={{ background: 'rgba(0,0,0,0.75)' }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onDismiss()
+      }}
+    >
+      <div className="rounded-lg p-8 w-80 text-center" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+        <div
+          className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
+          style={{ background: 'color-mix(in srgb, var(--primary) 15%, transparent)', color: 'var(--primary)' }}
+        >
+          <Icon name="check" size={22} strokeWidth={2.5} />
+        </div>
+        <p className="text-xs tracking-widest uppercase mb-1" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)' }}>
+          Cover Letter Generated
+        </p>
+        <h3 className="text-xl font-serif mb-1" style={{ color: 'var(--primary)' }}>{customerName}</h3>
+        <p className="text-sm mb-6" style={{ color: 'var(--muted-foreground)' }}>
+          {count} debit note{count === 1 ? '' : 's'} enclosed · saved to History
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={onDismiss}
+            className="flex-1 py-2 text-sm rounded"
+            style={{ border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+          >
+            Done
+          </button>
+          <button
+            onClick={onDownload}
+            className="flex-1 py-2 text-sm font-semibold rounded"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+          >
+            Download PDF
+          </button>
         </div>
       </div>
     </div>

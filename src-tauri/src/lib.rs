@@ -50,6 +50,7 @@ pub fn run() {
             commands::get_note,
             commands::next_dn_number,
             commands::feeder_match,
+            commands::outward_match,
             commands::create_note,
             commands::update_note,
             commands::delete_note,

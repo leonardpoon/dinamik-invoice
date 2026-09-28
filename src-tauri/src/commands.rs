@@ -140,6 +140,18 @@ pub fn feeder_match(
     state.db().feeder_match(&feeder_vessel, &feeder_voyage, exclude_id)
 }
 
+/// The outward-leg counterpart of `feeder_match` — looked up as the outward
+/// vessel/voyage fields are typed.
+#[tauri::command]
+pub fn outward_match(
+    state: State<'_, AppState>,
+    ocean_vessel: String,
+    ocean_voyage: String,
+    exclude_id: Option<i64>,
+) -> Result<Option<OutwardMatch>> {
+    state.db().outward_match(&ocean_vessel, &ocean_voyage, exclude_id)
+}
+
 #[tauri::command]
 pub fn create_note(state: State<'_, AppState>, input: DebitNoteInput) -> Result<DebitNote> {
     let mut db = state.db();
@@ -453,8 +465,13 @@ pub fn analytics(state: State<'_, AppState>, year_month: Option<String>) -> Resu
 /// currency for the same reason `analytics` above never surfaces a blended
 /// money total. In practice the register is almost always a single currency,
 /// so this is invisible until it isn't.
+///
+/// `year_month` scopes the totals and the buyer rankings, the same as
+/// `analytics` does for Overview — but never the `months` trend, which stays
+/// full history regardless. The screen's own chart has its own year picker;
+/// this filter is for everything around it, not for the chart.
 #[tauri::command]
-pub fn director_analytics(state: State<'_, AppState>) -> Result<DirectorAnalytics> {
+pub fn director_analytics(state: State<'_, AppState>, year_month: Option<String>) -> Result<DirectorAnalytics> {
     let all = state.db().summaries()?;
 
     let mut by_currency: std::collections::BTreeMap<String, Vec<&DebitNoteSummary>> = Default::default();
@@ -465,6 +482,8 @@ pub fn director_analytics(state: State<'_, AppState>) -> Result<DirectorAnalytic
     let mut currencies: Vec<CurrencyAnalytics> = by_currency
         .into_iter()
         .map(|(currency, notes)| {
+            // The trend chart's own data — every month this currency has ever
+            // seen, untouched by the page's period filter.
             let mut keys: Vec<String> = notes
                 .iter()
                 .map(|n| n.year_month.clone())
@@ -489,8 +508,18 @@ pub fn director_analytics(state: State<'_, AppState>) -> Result<DirectorAnalytic
                 })
                 .collect();
 
+            // Everything else — the totals and the buyer rankings — is scoped
+            // to the requested period, the same window `analytics` reads for
+            // Overview.
+            let scoped: Vec<&&DebitNoteSummary> = match year_month.as_deref() {
+                Some(ym) if !ym.is_empty() && ym != "all" => {
+                    notes.iter().filter(|n| n.year_month == ym).collect()
+                }
+                _ => notes.iter().collect(),
+            };
+
             let mut buyer_map: std::collections::HashMap<String, NameStat> = Default::default();
-            for n in &notes {
+            for n in &scoped {
                 let name = if n.buyer_name.trim().is_empty() {
                     "—".to_string()
                 } else {
@@ -517,11 +546,11 @@ pub fn director_analytics(state: State<'_, AppState>) -> Result<DirectorAnalytic
             buyers.sort_by(|a, b| b.revenue.partial_cmp(&a.revenue).unwrap_or(std::cmp::Ordering::Equal));
 
             CurrencyAnalytics {
-                total_notes: notes.len(),
-                total_tonnage: calc::round3(notes.iter().map(|n| n.tonnage).sum()),
-                total_revenue: calc::round2(notes.iter().map(|n| n.total_amount).sum()),
-                total_cost: calc::round2(notes.iter().map(|n| n.total_cost).sum()),
-                total_profit: calc::round2(notes.iter().map(|n| n.profit).sum()),
+                total_notes: scoped.len(),
+                total_tonnage: calc::round3(scoped.iter().map(|n| n.tonnage).sum()),
+                total_revenue: calc::round2(scoped.iter().map(|n| n.total_amount).sum()),
+                total_cost: calc::round2(scoped.iter().map(|n| n.total_cost).sum()),
+                total_profit: calc::round2(scoped.iter().map(|n| n.profit).sum()),
                 months,
                 buyers,
                 currency,
@@ -547,15 +576,20 @@ pub fn overview_report_pdf(state: State<'_, AppState>, year_month: Option<String
 }
 
 /// The same, for the director's Analytics tab — one currency at a time, same
-/// as the screen.
+/// as the screen: totals and buyer rankings scoped to `year_month`, the
+/// trend chart and the forecast left at full history either way.
 #[tauri::command]
-pub fn director_report_pdf(state: State<'_, AppState>, currency: String) -> Result<String> {
-    let data = director_analytics(state.clone())?;
+pub fn director_report_pdf(state: State<'_, AppState>, currency: String, year_month: Option<String>) -> Result<String> {
+    let data = director_analytics(state.clone(), year_month.clone())?;
     let settings = state.db().settings()?;
     let scoped = data
         .currencies
         .into_iter()
         .find(|c| c.currency == currency)
         .ok_or_else(|| AppError::NotFound(format!("no figures for {currency}")))?;
-    Ok(b64(report::render_director(&scoped, &settings, &today())))
+    let scope_label = match year_month.as_deref() {
+        Some(ym) if !ym.is_empty() && ym != "all" => cover_letter::month_label(ym),
+        _ => "All time".to_string(),
+    };
+    Ok(b64(report::render_director(&scoped, &settings, &scope_label, &today())))
 }

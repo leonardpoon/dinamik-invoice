@@ -18,6 +18,7 @@ import type {
   DebitNoteSummary,
   DirectorAnalytics,
   FeederMatch,
+  OutwardMatch,
   Preset,
   Preview,
   RateDefault,
@@ -46,6 +47,8 @@ export const api = {
   nextDnNumber: (yearMonth: string) => invoke<string>('next_dn_number', { yearMonth }),
   feederMatch: (feederVessel: string, feederVoyage: string, excludeId?: number) =>
     invoke<FeederMatch | null>('feeder_match', { feederVessel, feederVoyage, excludeId: excludeId ?? null }),
+  outwardMatch: (oceanVessel: string, oceanVoyage: string, excludeId?: number) =>
+    invoke<OutwardMatch | null>('outward_match', { oceanVessel, oceanVoyage, excludeId: excludeId ?? null }),
   createNote: (input: DebitNoteInput) => invoke<DebitNote>('create_note', { input }),
   updateNote: (id: number, input: DebitNoteInput) => invoke<DebitNote>('update_note', { id, input }),
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
@@ -62,9 +65,10 @@ export const api = {
   }) => invoke<Preview>('preview_figures', { input }),
 
   analytics: (yearMonth?: string) => invoke<Analytics>('analytics', { yearMonth: yearMonth ?? null }),
-  directorAnalytics: () => invoke<DirectorAnalytics>('director_analytics'),
+  directorAnalytics: (yearMonth?: string) => invoke<DirectorAnalytics>('director_analytics', { yearMonth: yearMonth ?? null }),
   overviewReportPdf: (yearMonth?: string) => invoke<string>('overview_report_pdf', { yearMonth: yearMonth ?? null }),
-  directorReportPdf: (currency: string) => invoke<string>('director_report_pdf', { currency }),
+  directorReportPdf: (currency: string, yearMonth?: string) =>
+    invoke<string>('director_report_pdf', { currency, yearMonth: yearMonth ?? null }),
 
   notePdf: (id: number) => invoke<string>('note_pdf', { id }),
   notePdfCopy: (id: number, copy: 'customer' | 'accountant') =>

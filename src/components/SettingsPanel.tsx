@@ -231,13 +231,13 @@ function DefaultsTab({ store, notify }: Props) {
 
         <Divider label="Cargo" />
 
-        <Row label="Boxes / Container" sub="boxes ÷ this = containers">
+        <Row label="Units / Container" sub="units ÷ this = containers">
           <input
             type="number"
-            min={0.0001}
-            step={0.0001}
+            min={1}
+            step={1}
             value={s.defaultBoxesPerContainer}
-            onChange={(e) => set('defaultBoxesPerContainer', parseFloat(e.target.value) || 0)}
+            onChange={(e) => set('defaultBoxesPerContainer', Math.round(parseFloat(e.target.value)) || 0)}
             style={{ fontFamily: 'var(--font-jetbrains)', fontSize: 12 }}
           />
         </Row>

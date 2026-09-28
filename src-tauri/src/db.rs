@@ -677,6 +677,36 @@ impl Db {
         }))
     }
 
+    /// Same idea as `feeder_match`, for the outward leg: once the outward
+    /// vessel and voyage match an existing note, offer back its B/L date and
+    /// destination — the same sailing takes every buyer on it to the same
+    /// place on the same day. `exclude_id` keeps a note being edited from
+    /// matching itself.
+    pub fn outward_match(
+        &self,
+        ocean_vessel: &str,
+        ocean_voyage: &str,
+        exclude_id: Option<i64>,
+    ) -> Result<Option<OutwardMatch>> {
+        let vessel = ocean_vessel.trim();
+        let voyage = ocean_voyage.trim();
+        if vessel.is_empty() || voyage.is_empty() {
+            return Ok(None);
+        }
+        let row = self
+            .conn
+            .query_row(
+                "SELECT bl_date, destination FROM debit_note
+                 WHERE lower(trim(ocean_vessel)) = lower(?1) AND lower(trim(ocean_voyage)) = lower(?2)
+                   AND bl_date <> '' AND id <> ?3
+                 ORDER BY id DESC LIMIT 1",
+                params![vessel, voyage, exclude_id.unwrap_or(-1)],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        Ok(row.map(|(bl_date, destination)| OutwardMatch { bl_date, destination }))
+    }
+
     pub fn delete_preset(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM preset WHERE id = ?1", params![id])?;
         Ok(())
@@ -1558,6 +1588,23 @@ mod tests {
 
         // A note excludes itself, e.g. while it's being edited.
         assert!(db.feeder_match("Jade Star", "2610W", Some(id)).unwrap().is_none());
+    }
+
+    #[test]
+    fn outward_match_offers_back_the_bl_date_and_destination() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        let id = db.create_debit_note(&sample_input(cid)).unwrap();
+
+        let hit = db.outward_match(" zim mount vinson ", "12e", None).unwrap().unwrap();
+        assert_eq!(hit.bl_date, "2026-09-29");
+        assert_eq!(hit.destination, "Savannah, USA");
+
+        assert!(db.outward_match("Zim Mount Vinson", "9999X", None).unwrap().is_none());
+        assert!(db.outward_match("", "12E", None).unwrap().is_none());
+
+        // A note excludes itself, e.g. while it's being edited.
+        assert!(db.outward_match("Zim Mount Vinson", "12E", Some(id)).unwrap().is_none());
     }
 
     #[test]

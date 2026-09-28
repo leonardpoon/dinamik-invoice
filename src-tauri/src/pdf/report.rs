@@ -218,26 +218,21 @@ pub fn render_overview(data: &Analytics, settings: &Settings, scope_label: &str,
     section_title(p, y, "TONNAGE BY FIRST CARRIERS");
     y += 5.0;
     let vessels: Vec<(String, f64)> = top_by(&data.vessels, |s| s.tonnage);
-    y = hbar_chart(p, L, y, R - L, 7.0, &vessels, |v| format!("{} MT", fmt2(v))) + 8.0;
-
-    section_title(p, y, "GRADE DISTRIBUTION");
-    y += 5.0;
-    let products: Vec<(String, f64)> = top_by(&data.products, |s| s.tonnage);
-    hbar_chart(p, L, y, R - L, 7.0, &products, |v| format!("{} MT", fmt2(v)));
+    hbar_chart(p, L, y, R - L, 7.0, &vessels, |v| format!("{} MT", fmt2(v)));
 
     pdf.to_bytes()
 }
 
 /// The director's Analytics tab, one currency at a time — money, the trend,
 /// who actually makes it, and the same safe forecast range the screen shows.
-pub fn render_director(data: &CurrencyAnalytics, settings: &Settings, today: &str) -> Vec<u8> {
+pub fn render_director(data: &CurrencyAnalytics, settings: &Settings, scope_label: &str, today: &str) -> Vec<u8> {
     let mut pdf = Pdf::new(format!("Director Analytics \u{2014} {}", data.currency));
     let p = pdf.add_page();
     header(
         p,
         &settings.company_name,
         "Director Analytics",
-        &format!("Revenue, cost and profit \u{2014} all time \u{2014} {}", data.currency),
+        &format!("Revenue, cost and profit \u{2014} {scope_label} \u{2014} {}", data.currency),
         today,
     );
 
@@ -380,12 +375,12 @@ mod tests {
             months: vec![month("202609", 12000.0, 7000.0, 5000.0, 250.0, 1)],
             buyers: vec![name_stat("Jaya Asri", 250.0, 12000.0, 5000.0)],
         };
-        let bytes = render_director(&data, &Settings::default(), "2026-09-30");
+        let bytes = render_director(&data, &Settings::default(), "All time", "2026-09-30");
         assert!(bytes.starts_with(b"%PDF-1.4"));
 
         let mut two_months = data;
         two_months.months.push(month("202608", 8000.0, 5000.0, 3000.0, 150.0, 1));
-        let bytes2 = render_director(&two_months, &Settings::default(), "2026-09-30");
+        let bytes2 = render_director(&two_months, &Settings::default(), "All time", "2026-09-30");
         assert!(bytes2.starts_with(b"%PDF-1.4"));
         assert!(bytes2.len() > bytes.len() || bytes2.len() > 100);
     }

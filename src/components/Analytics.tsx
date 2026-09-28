@@ -19,7 +19,19 @@ import { useEffect, useState } from 'react'
 
 import { api, errorMessage, savePdf } from '../api'
 import type { CurrencyAnalytics, MonthStat, NameStat } from '../types'
-import { Icon, PageHeader, PrimaryButton, MiniBar, Spinner, fmt2, fmtInt, todayIso } from '../ui'
+import {
+  Icon,
+  MONTH_NAMES,
+  PageHeader,
+  PrimaryButton,
+  MiniBar,
+  Spinner,
+  currentYearMonth,
+  fmt2,
+  fmtInt,
+  monthLabel,
+  todayIso,
+} from '../ui'
 
 const PASSWORD = 'dinamik'
 
@@ -89,6 +101,19 @@ interface ForecastRange {
   monthsUsed: number
 }
 
+/** `YYYYMM` for the first month of a rolling 12-month window ending this
+ * calendar month — e.g. run in September 2026, that's October 2025. Months
+ * are sparse (one entry per month that actually has a note), so "the last 12
+ * months" has to be read off the calendar rather than just taking the first
+ * 12 entries in the array — otherwise a single old outlier month, with
+ * nothing in between it and now, drags the whole chart back to it. */
+function twelveMonthsAgo(): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - 11)
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 /** The low/high read straight off the trailing `window` months' actuals —
  * not a fitted trend, on purpose (see file header). */
 function forecastRange(months: MonthStat[], pick: (m: MonthStat) => number, window = 3): ForecastRange | null {
@@ -108,11 +133,17 @@ function Dashboard({ notify }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [currency, setCurrency] = useState<string | null>(null)
   const [printing, setPrinting] = useState(false)
+  const [chartYear, setChartYear] = useState(() => new Date().getFullYear())
+  // The page's own period filter — defaults to the current month, same as
+  // Overview. Everything on the page follows it except the trend chart and
+  // the forecast, which stay full-history regardless (they have their own
+  // year picker instead).
+  const [scope, setScope] = useState(currentYearMonth)
 
   useEffect(() => {
     let cancelled = false
     api
-      .directorAnalytics()
+      .directorAnalytics(scope === 'all' ? undefined : scope)
       .then((d) => {
         if (cancelled) return
         setCurrencies(d.currencies)
@@ -124,7 +155,7 @@ function Dashboard({ notify }: Props) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [scope])
 
   if (error) {
     return (
@@ -156,18 +187,32 @@ function Dashboard({ notify }: Props) {
 
   const scoped = currencies.find((c) => c.currency === currency) ?? currencies[0]
   const margin = scoped.totalRevenue > 0 ? (scoped.totalProfit / scoped.totalRevenue) * 100 : 0
-  const bars = scoped.months.slice(0, 6).reverse()
-  const maxRevenue = Math.max(...bars.map((m) => m.revenue), 1)
   const buyersByProfit = [...scoped.buyers].sort((a, b) => b.profit - a.profit).slice(0, 6)
+
+  // The full calendar year, every month — including the ones with no
+  // revenue at all, so a quiet month reads as a gap rather than vanishing
+  // from the chart. The selector always offers the chosen year even if it
+  // has no data yet.
+  const revenueYears = new Set(scoped.months.map((m) => m.yearMonth.slice(0, 4)))
+  revenueYears.add(String(chartYear))
+  const revenueYearOptions = [...revenueYears].sort().reverse()
+  const monthByYm = new Map(scoped.months.map((m) => [m.yearMonth, m]))
+  const yearBars = MONTH_NAMES.map((name, i) => {
+    const yearMonth = `${chartYear}${String(i + 1).padStart(2, '0')}`
+    const m = monthByYm.get(yearMonth)
+    return { yearMonth, label: name, revenue: m?.revenue ?? 0, cost: m?.cost ?? 0, profit: m?.profit ?? 0 }
+  })
+  const maxYearRevenue = Math.max(...yearBars.map((m) => m.revenue), 1)
 
   const tonnageForecast = forecastRange(scoped.months, (m) => m.tonnage)
   const revenueForecast = forecastRange(scoped.months, (m) => m.revenue)
   const contractsForecast = forecastRange(scoped.months, (m) => m.count)
+  const scopeLabel = scope === 'all' ? 'All time' : monthLabel(scope)
 
   async function handlePrint() {
     setPrinting(true)
     try {
-      const b64 = await api.directorReportPdf(scoped.currency)
+      const b64 = await api.directorReportPdf(scoped.currency, scope === 'all' ? undefined : scope)
       const saved = await savePdf(b64, `director-analytics-${scoped.currency}-${todayIso()}.pdf`)
       if (saved) notify('Director Analytics report saved — open it to print', 'ok')
     } catch (e) {
@@ -182,14 +227,24 @@ function Dashboard({ notify }: Props) {
       <PageHeader
         eyebrow="Director"
         title="Director Analytics"
-        sub="Revenue, cost and profit — all time"
+        sub={`Revenue, cost and profit — ${scopeLabel}`}
         right={
           <div className="flex items-center gap-2">
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              style={{ fontSize: 12, padding: '6px 10px', fontFamily: 'var(--font-jetbrains)', minWidth: 170, width: 'auto' }}
+            >
+              <option value="all">All time</option>
+              {scoped.months.map((m) => (
+                <option key={m.yearMonth} value={m.yearMonth}>{m.label}</option>
+              ))}
+            </select>
             {currencies.length > 1 && (
               <select
                 value={scoped.currency}
                 onChange={(e) => setCurrency(e.target.value)}
-                style={{ fontSize: 12, padding: '6px 10px', fontFamily: 'var(--font-jetbrains)' }}
+                style={{ fontSize: 12, padding: '6px 10px', fontFamily: 'var(--font-jetbrains)', width: 'auto' }}
               >
                 {currencies.map((c) => (
                   <option key={c.currency} value={c.currency}>{c.currency}</option>
@@ -218,47 +273,56 @@ function Dashboard({ notify }: Props) {
           <StatTile label="Margin" value={`${margin.toFixed(1)}%`} accent />
         </div>
 
-        {/* Row 2 — revenue trend, cost/profit split within each bar. */}
+        {/* Row 2 — revenue trend across one calendar year, cost/profit split
+            within each bar, switchable the same way the Overview tab's
+            monthly tonnage chart is. */}
         <div className="p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div className="flex items-center justify-between mb-5">
             <div className="text-xs tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>
               Monthly Revenue — cost vs. profit
             </div>
-            <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--border)' }} /> Cost
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--primary)' }} /> Profit
-              </span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ background: 'var(--border)' }} /> Cost
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ background: 'var(--primary)' }} /> Profit
+                </span>
+              </div>
+              <select
+                value={chartYear}
+                onChange={(e) => setChartYear(parseInt(e.target.value, 10))}
+                style={{ fontSize: 12, padding: '4px 10px', fontFamily: 'var(--font-jetbrains)', width: 'auto', minWidth: 90 }}
+              >
+                {revenueYearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
             </div>
           </div>
-          {bars.length === 0 ? (
-            <p className="text-xs text-center py-6" style={{ color: 'var(--muted-foreground)' }}>No data yet</p>
-          ) : (
-            <div className="flex items-end gap-3" style={{ height: 140 }}>
-              {bars.map((m) => {
-                const total = m.cost + m.profit || 1
-                return (
-                  <div key={m.yearMonth} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                    <div className="text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 9 }}>
-                      {fmt2(m.revenue)}
-                    </div>
-                    <div
-                      className="w-full rounded-t overflow-hidden flex flex-col justify-end"
-                      style={{ height: `${Math.max((m.revenue / maxRevenue) * 100, 1.5)}%`, minHeight: 3 }}
-                    >
-                      <div style={{ height: `${(m.profit / total) * 100}%`, background: 'var(--primary)' }} title={`Profit ${fmt2(m.profit)}`} />
-                      <div style={{ height: `${(m.cost / total) * 100}%`, background: 'var(--border)' }} title={`Cost ${fmt2(m.cost)}`} />
-                    </div>
-                    <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>
-                      {m.label.slice(0, 3)} {m.yearMonth.slice(2, 4)}
-                    </div>
+          <div className="flex items-end gap-2" style={{ height: 140 }}>
+            {yearBars.map((m) => {
+              const total = m.cost + m.profit || 1
+              return (
+                <div key={m.yearMonth} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                  <div className="text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 8 }}>
+                    {m.revenue > 0 ? fmt2(m.revenue) : ''}
                   </div>
-                )
-              })}
-            </div>
-          )}
+                  <div
+                    className="w-full rounded-t overflow-hidden flex flex-col justify-end"
+                    style={{ height: `${Math.max((m.revenue / maxYearRevenue) * 100, m.revenue > 0 ? 1.5 : 0)}%`, minHeight: m.revenue > 0 ? 3 : 0 }}
+                  >
+                    <div style={{ height: `${(m.profit / total) * 100}%`, background: 'var(--primary)' }} title={`Profit ${fmt2(m.profit)}`} />
+                    <div style={{ height: `${(m.cost / total) * 100}%`, background: 'var(--border)' }} title={`Cost ${fmt2(m.cost)}`} />
+                  </div>
+                  <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>
+                    {m.label.slice(0, 3)}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         {/* Row 3 — who actually makes the money. */}
@@ -403,7 +467,11 @@ function MonthlyLineCard({
   unit: string
   prefix: string
 }) {
-  const trailing = months.slice(0, 12).reverse() // oldest -> newest
+  const cutoff = twelveMonthsAgo()
+  const trailing = months
+    .filter((m) => m.yearMonth >= cutoff)
+    .slice(0, 12)
+    .reverse() // oldest -> newest
   const points: ChartPoint[] = trailing.map((m) => ({ label: m.label.slice(0, 3), value: pick(m) }))
   if (range) points.push({ label: 'Proj', value: range.expected })
   const last = points[points.length - 1]

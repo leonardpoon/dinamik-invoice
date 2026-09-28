@@ -13,8 +13,10 @@ import type { Analytics as AnalyticsData, DebitNoteSummary, NameStat } from '../
 import {
   Icon,
   MiniBar,
+  MONTH_NAMES,
   PageHeader,
   PrimaryButton,
+  currentYearMonth,
   fmt2,
   fmtDate,
   fmtInt,
@@ -33,9 +35,17 @@ interface Props {
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 
 export default function Overview({ notes, onNew, onOpenCurrent, onEdit, notify }: Props) {
-  const [scope, setScope] = useState('all')
+  // Defaults to the current month rather than all time — opening the page
+  // should read as "what's happening now," not a lifetime total.
+  const [scope, setScope] = useState(currentYearMonth)
   const [buyerMetric, setBuyerMetric] = useState<'tonnage' | 'count'>('tonnage')
   const [printing, setPrinting] = useState(false)
+  // The Monthly Tonnage chart's own year normally follows the period filter
+  // above; this holds a one-off override for browsing a different year
+  // without disturbing that filter, and clears itself the moment the filter
+  // changes so the chart goes back to following it.
+  const [yearOverride, setYearOverride] = useState<number | null>(null)
+  useEffect(() => setYearOverride(null), [scope])
   const [data, setData] = useState<AnalyticsData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -112,9 +122,27 @@ export default function Overview({ notes, onNew, onOpenCurrent, onEdit, notify }
     )
   }
 
-  // Last six months, oldest first, for the tonnage trend.
-  const bars = data.months.slice(0, 6).reverse()
-  const maxTonnage = Math.max(...bars.map((m) => m.tonnage), 1)
+  // Follows the period filter above by default — "all time" reads as the
+  // current calendar year, and picking a specific month reads as that
+  // month's year — but a year picked from the chart's own selector overrides
+  // that until the filter itself changes (see the effect above).
+  const scopeYear = scope === 'all' ? new Date().getFullYear() : parseInt(scope.slice(0, 4), 10)
+  const chartYear = yearOverride ?? scopeYear
+
+  // The full calendar year, every month — including the ones with no notes
+  // at all, so a quiet month reads as a gap rather than just vanishing from
+  // the chart. The selector always offers the chosen year even if it has no
+  // data yet (e.g. flipping forward into the current year before anything's
+  // been billed).
+  const dataYears = new Set(data.months.map((m) => m.yearMonth.slice(0, 4)))
+  dataYears.add(String(chartYear))
+  const yearOptions = [...dataYears].sort().reverse()
+  const monthByYm = new Map(data.months.map((m) => [m.yearMonth, m]))
+  const yearBars = MONTH_NAMES.map((name, i) => {
+    const yearMonth = `${chartYear}${String(i + 1).padStart(2, '0')}`
+    return { yearMonth, label: name, tonnage: monthByYm.get(yearMonth)?.tonnage ?? 0 }
+  })
+  const maxYearTonnage = Math.max(...yearBars.map((m) => m.tonnage), 1)
   const scopeLabel = scope === 'all' ? 'All time' : monthLabel(scope)
 
   async function handlePrint() {
@@ -184,55 +212,46 @@ export default function Overview({ notes, onNew, onOpenCurrent, onEdit, notify }
           </div>
         </div>
 
-        {/* Row 2 — monthly tonnage trend, and the buyer breakdown for the scope above. */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-            <div className="text-xs tracking-widest uppercase mb-5" style={{ color: 'var(--muted-foreground)' }}>
+        {/* Row 2 — monthly tonnage across one calendar year, switchable. */}
+        <div className="p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between mb-5">
+            <div className="text-xs tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>
               Monthly Tonnage (MT)
             </div>
-            <div className="flex items-end gap-3" style={{ height: 120 }}>
-              {bars.map((m) => (
-                <div key={m.yearMonth} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                  <div className="text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 9 }}>
-                    {fmt2(m.tonnage)}
-                  </div>
-                  <div
-                    className="w-full rounded-t"
-                    style={{ height: `${Math.max((m.tonnage / maxTonnage) * 100, 1.5)}%`, background: 'var(--primary)', minHeight: 3 }}
-                    title={`${fmt2(m.tonnage)} MT`}
-                  />
-                  <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>
-                    {m.label.slice(0, 3)} {m.yearMonth.slice(2, 4)}
-                  </div>
-                </div>
+            <select
+              value={chartYear}
+              onChange={(e) => setYearOverride(parseInt(e.target.value, 10))}
+              style={{ fontSize: 12, padding: '4px 10px', fontFamily: 'var(--font-jetbrains)', width: 'auto', minWidth: 90 }}
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>{y}</option>
               ))}
-            </div>
+            </select>
           </div>
-
-          <div className="p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-xs tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>Buyers</div>
-              <div className="flex rounded overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                {(['tonnage', 'count'] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => setBuyerMetric(m)}
-                    className="px-2 py-1 text-xs"
-                    style={{
-                      background: buyerMetric === m ? 'var(--primary)' : 'transparent',
-                      color: buyerMetric === m ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
-                    }}
-                  >
-                    {m === 'tonnage' ? 'MT' : '#'}
-                  </button>
-                ))}
+          <div className="flex items-end gap-2" style={{ height: 160 }}>
+            {yearBars.map((m) => (
+              <div key={m.yearMonth} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                <div className="text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 8 }}>
+                  {m.tonnage > 0 ? fmt2(m.tonnage) : ''}
+                </div>
+                <div
+                  className="w-full rounded-t"
+                  style={{
+                    height: `${Math.max((m.tonnage / maxYearTonnage) * 100, m.tonnage > 0 ? 1.5 : 0)}%`,
+                    background: 'var(--primary)',
+                    minHeight: m.tonnage > 0 ? 3 : 0,
+                  }}
+                  title={`${m.label} ${chartYear}: ${fmt2(m.tonnage)} MT`}
+                />
+                <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>
+                  {m.label.slice(0, 3)}
+                </div>
               </div>
-            </div>
-            <BuyerBars stats={data.buyers} metric={buyerMetric} />
+            ))}
           </div>
         </div>
 
-        {/* Row 3 — first-carrier tonnage and grade distribution, both scoped
+        {/* Row 3 — first-carrier tonnage and the buyer breakdown, both scoped
             by the selector above (all time or a single period). */}
         <div className="grid grid-cols-3 gap-4">
           <div className="col-span-2 p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
@@ -270,7 +289,27 @@ export default function Overview({ notes, onNew, onOpenCurrent, onEdit, notify }
             )}
           </div>
 
-          <RankPanel title="Grade Distribution" stats={data.products} metric="tonnage" suffix=" MT" />
+          <div className="p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xs tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>Buyers</div>
+              <div className="flex rounded overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {(['tonnage', 'count'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setBuyerMetric(m)}
+                    className="px-2 py-1 text-xs"
+                    style={{
+                      background: buyerMetric === m ? 'var(--primary)' : 'transparent',
+                      color: buyerMetric === m ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                    }}
+                  >
+                    {m === 'tonnage' ? 'MT' : '#'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <BuyerBars stats={data.buyers} metric={buyerMetric} />
+          </div>
         </div>
 
         {/* Row 4 — the 5 most recent notes, replacing the old by-month table. */}
@@ -292,7 +331,7 @@ export default function Overview({ notes, onNew, onOpenCurrent, onEdit, notify }
                 <span style={{ fontFamily: 'var(--font-jetbrains)', color: 'var(--primary)', fontSize: 12 }}>{n.dnNumber}</span>
                 <span className="truncate">{n.buyerName || '—'}</span>
                 <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{fmtDate(n.dnDate)}</span>
-                <span className="text-right text-xs" style={{ fontFamily: 'var(--font-jetbrains)' }}>{fmtInt(n.boxes)} boxes · {fmt2(n.tonnage)} MT</span>
+                <span className="text-right text-xs" style={{ fontFamily: 'var(--font-jetbrains)' }}>{fmtInt(n.boxes)} units · {fmt2(n.tonnage)} MT</span>
               </button>
             ))}
           </div>
@@ -349,43 +388,3 @@ function BuyerBars({ stats, metric }: { stats: NameStat[]; metric: 'tonnage' | '
   )
 }
 
-function RankPanel({
-  title,
-  stats,
-  metric,
-  suffix,
-}: {
-  title: string
-  stats: NameStat[]
-  metric: 'tonnage' | 'count'
-  suffix: string
-}) {
-  const top = stats.slice(0, 6)
-  const max = Math.max(...top.map((s) => (metric === 'tonnage' ? s.tonnage : s.count)), 1)
-  return (
-    <div className="p-5 rounded" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-      <div className="text-xs tracking-widest uppercase mb-4" style={{ color: 'var(--muted-foreground)' }}>{title}</div>
-      {top.length === 0 ? (
-        <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>No data</p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {top.map((s) => {
-            const value = metric === 'tonnage' ? s.tonnage : s.count
-            return (
-              <div key={s.name}>
-                <div className="flex justify-between mb-1 gap-2">
-                  <span className="text-xs truncate">{s.name}</span>
-                  <span className="text-xs shrink-0" style={{ fontFamily: 'var(--font-jetbrains)', color: 'var(--muted-foreground)', fontSize: 10 }}>
-                    {metric === 'tonnage' ? fmt2(value) : fmtInt(value)}
-                    {suffix}
-                  </span>
-                </div>
-                <MiniBar pct={(value / max) * 100} />
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}

@@ -115,6 +115,13 @@ export interface FeederMatch {
   blPrefix: string
 }
 
+/** A prior note's outward call, offered back when the outward vessel +
+ * voyage match. */
+export interface OutwardMatch {
+  blDate: string
+  destination: string
+}
+
 /** What the form sends. Everything derived is absent by design. */
 export interface DebitNoteInput {
   dnNumber: string

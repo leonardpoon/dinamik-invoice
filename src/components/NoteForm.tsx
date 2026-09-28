@@ -257,6 +257,36 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feederKey, editing?.id])
 
+  // The outward leg's counterpart — the same sailing carries every buyer on
+  // it to the same place on the same day, so once the outward vessel and
+  // voyage match an existing note, its B/L date and destination are offered
+  // back instead of being retyped. Never overwrites something already typed.
+  const outwardKey = useDebounced(`${form.oceanVessel}|${form.oceanVoyage}`)
+  useEffect(() => {
+    if (!form.oceanVessel.trim() || !form.oceanVoyage.trim()) return
+    let cancelled = false
+    api
+      .outwardMatch(form.oceanVessel, form.oceanVoyage, editing?.id)
+      .then((match) => {
+        if (cancelled || !match) return
+        const filled: string[] = []
+        if (!form.blDate.trim()) filled.push('blDate')
+        if (!form.destination.trim()) filled.push('destination')
+        if (!filled.length) return
+        setForm((f) => ({
+          ...f,
+          ...(filled.includes('blDate') ? { blDate: match.blDate } : {}),
+          ...(filled.includes('destination') ? { destination: match.destination } : {}),
+        }))
+        setHighlighted((h) => [...new Set([...h, ...filled])])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outwardKey, editing?.id])
+
   const composedDn = autoNumber
     ? suggested
     : dnSeq.trim()
@@ -560,6 +590,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
 
             {/* Identity */}
             <Section title="Note Identity">
+              <div className="flex flex-col gap-5">
               <div className="grid grid-cols-2 gap-x-6 gap-y-5">
                 <Field label="Debit Number" required error={errors.dnSeq} hint="DN-YYYYMM-no.">
                   <div className="flex flex-col gap-1.5">
@@ -631,8 +662,13 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                 <Field label="Date" required error={errors.dnDate}>
                   <input type="date" value={form.dnDate} onChange={(e) => set('dnDate', e.target.value)} style={ring('dnDate')} />
                 </Field>
+              </div>
 
-                <Field label="Your Invoice No." hint="the customer's reference">
+              {/* Narrow fields, three across — none of the three needs much
+                  room, so they share a row instead of each claiming half the
+                  section's width the way the rest of the grid does. */}
+              <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+                <Field label="Your Invoice No.">
                   <MonoInput
                     value={form.customerInvoiceRef}
                     onChange={(e) => set('customerInvoiceRef', e.target.value)}
@@ -640,23 +676,20 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                   />
                 </Field>
 
-                <Field label="P No." hint="e.g. 153/26, plus where — Tuaran, etc.">
-                  <div className="flex items-center gap-1.5">
-                    <MonoInput
-                      value={form.pNumber}
-                      onChange={(e) => set('pNumber', e.target.value)}
-                      placeholder="153/26"
-                      style={{ ...ring('pNumber'), flex: 1, minWidth: 0 }}
-                    />
-                    <input
-                      value={form.pDescriptor}
-                      onChange={(e) => set('pDescriptor', e.target.value)}
-                      placeholder="Tuaran"
-                      style={{ flex: 1, minWidth: 0 }}
-                    />
-                  </div>
+                <Field label="P No.">
+                  <MonoInput
+                    value={form.pNumber}
+                    onChange={(e) => set('pNumber', e.target.value)}
+                    style={ring('pNumber')}
+                  />
                 </Field>
 
+                <Field label="Factory Code">
+                  <input value={form.pDescriptor} onChange={(e) => set('pDescriptor', e.target.value)} />
+                </Field>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-6 gap-y-5">
                 <Field label="SI Number" error={errors.siNumber} hint="fill this or Contract No.">
                   <MonoInput value={form.siNumber} onChange={(e) => set('siNumber', e.target.value)} style={ring('siNumber')} />
                 </Field>
@@ -665,18 +698,19 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                   <MonoInput value={form.contractNo} onChange={(e) => set('contractNo', e.target.value)} style={ring('contractNo')} />
                 </Field>
               </div>
+              </div>
             </Section>
 
             {/* Cargo */}
             <Section title="Cargo">
               <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-                <Field label="Boxes" required error={errors.boxes}>
+                <Field label="Units" required error={errors.boxes}>
                   <MonoInput
                     type="number"
                     min={0}
                     step="1"
                     value={form.boxes || ''}
-                    onChange={(e) => set('boxes', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => set('boxes', Math.round(parseFloat(e.target.value)) || 0)}
                     placeholder="90"
                     style={ring('boxes')}
                   />
@@ -690,13 +724,13 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                   />
                 </Field>
 
-                <Field label="Boxes / Container" required error={errors.boxesPerContainer}>
+                <Field label="Units / Container" required error={errors.boxesPerContainer}>
                   <MonoInput
                     type="number"
                     min={0}
-                    step="0.0001"
+                    step="1"
                     value={form.boxesPerContainer || ''}
-                    onChange={(e) => set('boxesPerContainer', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => set('boxesPerContainer', Math.round(parseFloat(e.target.value)) || 0)}
                     style={ring('boxesPerContainer')}
                   />
                 </Field>
@@ -801,7 +835,6 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                   <input
                     value={form.destination}
                     onChange={(e) => set('destination', e.target.value)}
-                    placeholder="Savannah, USA"
                     style={ring('destination')}
                   />
                 </Field>

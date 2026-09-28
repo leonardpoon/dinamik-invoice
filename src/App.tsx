@@ -121,10 +121,15 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--background)' }}>
       <header
-        className="flex items-center justify-between px-6 shrink-0 gap-6"
-        style={{ height: 52, background: 'var(--card)', borderBottom: '1px solid var(--border)' }}
+        className="grid items-center px-6 shrink-0 gap-6"
+        style={{
+          height: 52,
+          background: 'var(--card)',
+          borderBottom: '1px solid var(--border)',
+          gridTemplateColumns: '1fr auto 1fr',
+        }}
       >
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 justify-self-start">
           <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
             <Icon name="anchor" size={13} strokeWidth={2.5} />
           </div>
@@ -166,7 +171,7 @@ export default function App() {
           })}
         </nav>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 justify-self-end">
           <UpdateChecker update={update} notify={notify} />
           <button
             onClick={() => setLight((l) => !l)}
