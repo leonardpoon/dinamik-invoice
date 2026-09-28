@@ -233,7 +233,7 @@ function Compose({ store, notify, mode, setMode }: Props & { mode: Mode; setMode
               value={attnName}
               onChange={(e) => setAttnName(e.target.value)}
               onBlur={commitAttnName}
-              placeholder="Ms Chia Ching Lian"
+              placeholder="Ms Tan Wei Ling"
             />
           </div>
 

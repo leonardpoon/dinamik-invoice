@@ -315,13 +315,13 @@ impl Db {
                    (name, address_line1, address_line2, address_line3, address_line4, address_line5, attention)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
-                    "Sabah Rubber Industry Board",
-                    "Level 3, Wisma Pertanian Sabah",
-                    "Jalan Tasik",
-                    "Luyang (off Jalan Maktab Gaya)",
-                    "Kota Kinabalu, Sabah",
+                    "Nusantara Rubber Board",
+                    "Level 3, Wisma Perindustrian Ria",
+                    "Jalan Perindustrian 4",
+                    "Tanjung (off Jalan Perusahaan)",
+                    "Kuching, Sarawak",
                     "East Malaysia",
-                    "Ms Chia Ching Lian",
+                    "Ms Tan Wei Ling",
                 ],
             )?;
         }
@@ -1364,23 +1364,23 @@ mod tests {
             year_month: "202609".into(),
             dn_date: "2026-09-25".into(),
             customer_id,
-            buyer_name: "Bridgestone Singapore Pte Ltd".into(),
-            customer_invoice_ref: "13200".into(),
-            si_number: "179/26".into(),
-            contract_no: "283230".into(),
+            buyer_name: "Meridian Tyre Manufacturing Pte Ltd".into(),
+            customer_invoice_ref: "88010".into(),
+            si_number: "205/26".into(),
+            contract_no: "410275".into(),
             boxes: 90.0,
             packing_desc: "Metal  Boxes (MB5)".into(),
             boxes_per_container: 16.0,
             mt_per_container: 20.16,
             product_desc: "SMR 20 Rubber".into(),
             shipment_type: ShipmentType::Container,
-            feeder_vessel: "Jade Star".into(),
-            feeder_voyage: "2610W".into(),
+            feeder_vessel: "Coral Star".into(),
+            feeder_voyage: "2609W".into(),
             feeder_arrival_date: "2026-09-22".into(),
-            bl_number: "JJST2610W-BKI01".into(),
-            p_number: "179/26".into(),
-            p_descriptor: "Tuaran".into(),
-            ocean_vessel: "Zim Mount Vinson".into(),
+            bl_number: "MVSS2609W-XYZ01".into(),
+            p_number: "205/26".into(),
+            p_descriptor: "Riverside Estate".into(),
+            ocean_vessel: "Pacific Voyager".into(),
             ocean_voyage: "12E".into(),
             destination: "Savannah, USA".into(),
             bl_date: "2026-09-29".into(),
@@ -1395,7 +1395,7 @@ mod tests {
     #[test]
     fn seeds_settings_rate_card_and_a_customer() {
         let db = Db::open_in_memory().unwrap();
-        assert_eq!(db.settings().unwrap().default_rate_per_mt, 54.0);
+        assert_eq!(db.settings().unwrap().default_rate_per_mt, 0.0);
         assert_eq!(db.rate_card(ShipmentType::Container).unwrap().len(), 17);
         // Breakbulk gets its own, independent card, seeded from the same
         // starting template so it isn't empty on first use.
@@ -1417,7 +1417,7 @@ mod tests {
         assert_eq!(n.amount_in_words, "Six Thousand One Hundred Twenty Three and cents Sixty only");
         assert_eq!(n.costs.len(), 17);
         assert_eq!(n.profit, calc::round2(n.total_amount - n.total_cost));
-        assert_eq!(n.customer.name, "Sabah Rubber Industry Board");
+        assert_eq!(n.customer.name, "Nusantara Rubber Board");
     }
 
     #[test]
@@ -1556,7 +1556,7 @@ mod tests {
         let numbers = db.dn_numbers_by_id(&[id1, id2]).unwrap();
         assert_eq!(numbers, vec!["DN202609-01", "DN202609-02"]);
 
-        let letter_id = db.save_cover_letter(cid, "Ms Chia Ching Lian", "2026-09-30", &[id1, id2]).unwrap();
+        let letter_id = db.save_cover_letter(cid, "Ms Tan Wei Ling", "2026-09-30", &[id1, id2]).unwrap();
         assert_eq!(db.cover_letter_dn_numbers(letter_id).unwrap(), vec!["DN202609-01", "DN202609-02"]);
 
         let still_eligible = db.cover_letter_eligible_notes(cid).unwrap();
@@ -1579,15 +1579,15 @@ mod tests {
 
         // Same vessel and voyage, different case and stray whitespace — a
         // second buyer's note for the same feeder call.
-        let hit = db.feeder_match(" jade star ", "2610w", None).unwrap().unwrap();
+        let hit = db.feeder_match(" coral star ", "2609w", None).unwrap().unwrap();
         assert_eq!(hit.feeder_arrival_date, "2026-09-22");
-        assert_eq!(hit.bl_prefix, "JJST2610W");
+        assert_eq!(hit.bl_prefix, "MVSS2609W");
 
-        assert!(db.feeder_match("Jade Star", "9999X", None).unwrap().is_none());
-        assert!(db.feeder_match("", "2610W", None).unwrap().is_none());
+        assert!(db.feeder_match("Coral Star", "9999X", None).unwrap().is_none());
+        assert!(db.feeder_match("", "2609W", None).unwrap().is_none());
 
         // A note excludes itself, e.g. while it's being edited.
-        assert!(db.feeder_match("Jade Star", "2610W", Some(id)).unwrap().is_none());
+        assert!(db.feeder_match("Coral Star", "2609W", Some(id)).unwrap().is_none());
     }
 
     #[test]
@@ -1596,15 +1596,15 @@ mod tests {
         let cid = db.customers().unwrap()[0].id;
         let id = db.create_debit_note(&sample_input(cid)).unwrap();
 
-        let hit = db.outward_match(" zim mount vinson ", "12e", None).unwrap().unwrap();
+        let hit = db.outward_match(" pacific voyager ", "12e", None).unwrap().unwrap();
         assert_eq!(hit.bl_date, "2026-09-29");
         assert_eq!(hit.destination, "Savannah, USA");
 
-        assert!(db.outward_match("Zim Mount Vinson", "9999X", None).unwrap().is_none());
+        assert!(db.outward_match("Pacific Voyager", "9999X", None).unwrap().is_none());
         assert!(db.outward_match("", "12E", None).unwrap().is_none());
 
         // A note excludes itself, e.g. while it's being edited.
-        assert!(db.outward_match("Zim Mount Vinson", "12E", Some(id)).unwrap().is_none());
+        assert!(db.outward_match("Pacific Voyager", "12E", Some(id)).unwrap().is_none());
     }
 
     #[test]
@@ -1614,7 +1614,7 @@ mod tests {
         db.save_preset(&Preset {
             id: 0,
             customer_id: Some(cid),
-            buyer_name: "Bridgestone Singapore Pte Ltd".into(),
+            buyer_name: "Meridian Tyre Manufacturing Pte Ltd".into(),
             destination: "Savannah, USA".into(),
             si_number: String::new(),
             product_desc: "SMR 20 Rubber".into(),
@@ -1623,9 +1623,9 @@ mod tests {
             rate_per_mt: 54.0,
             boxes_per_container: 16.0,
             mt_per_container: 20.16,
-            contract_no: "283230".into(),
+            contract_no: "410275".into(),
             boxes: 90.0,
-            ocean_vessel: "Zim Mount Vinson".into(),
+            ocean_vessel: "Pacific Voyager".into(),
             ocean_voyage: "12E".into(),
         })
         .unwrap();
@@ -1633,7 +1633,7 @@ mod tests {
         let presets = db.presets().unwrap();
         assert_eq!(presets.len(), 1);
         assert_eq!(presets[0].boxes, 90.0);
-        assert_eq!(presets[0].ocean_vessel, "Zim Mount Vinson");
+        assert_eq!(presets[0].ocean_vessel, "Pacific Voyager");
         assert_eq!(presets[0].ocean_voyage, "12E");
     }
 

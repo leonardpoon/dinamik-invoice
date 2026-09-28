@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn truncate_fits_budget() {
-        let s = truncate("Zim Mount Vinson Voyage 12E", Font::Tahoma, 9.0, 20.0);
+        let s = truncate("Pacific Voyager Voyage 12E", Font::Tahoma, 9.0, 20.0);
         assert!(text_width(&s, Font::Tahoma, 9.0) <= 20.0);
         assert!(s.ends_with("..."));
     }

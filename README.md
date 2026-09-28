@@ -118,12 +118,14 @@ nothing else — it sends what the user typed and renders what comes back.
 
 ### Reference material
 
-- `samples/sample.xlsx` — the original workbook. Sheet 1 is the debit note
-  (columns A–R customer copy, T–AH accounts copy, costing at rows 55–61);
-  sheet 2 is the cover letter.
 - `Sample UI/` — the Figma Make export the interface was taken from.
 - `legacy/nextjs/` — the previous Next.js + Prisma + MySQL version, kept for
   reference until the desktop app has been in use for a while.
+
+The original Excel workbook this app replaces is not in the repo — it holds
+real customer and financial data. `src-tauri/src/calc.rs` and `src-tauri/src/pdf/`
+are the transcription of its formulas and layout, with the cell/row references
+quoted in comments against each one.
 
 ### Notes
 

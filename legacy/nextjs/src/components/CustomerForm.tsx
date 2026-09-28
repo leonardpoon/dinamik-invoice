@@ -40,7 +40,7 @@ export default function CustomerForm({ id, initial }: { id: number | null; initi
         ))}
         <div>
           <label className="label">Attention (used on the cover letter)</label>
-          <input name="attention" defaultValue={initial.attention} className="input" placeholder="Ms Chia Ching Lian" />
+          <input name="attention" defaultValue={initial.attention} className="input" placeholder="Ms Tan Wei Ling" />
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="active" defaultChecked={initial.active} /> Active (shown when creating debit notes)

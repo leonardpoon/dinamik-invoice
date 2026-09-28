@@ -189,7 +189,7 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     // --- carriage (rows 19-23) -------------------------------------------
     let mut y = Y_FEEDER;
     if !note.feeder_vessel.trim().is_empty() {
-        // "Ex Jade Star Voy 2610W Arrd 22 September 2026" — one flowing line.
+        // "Ex Coral Star Voy 2609W Arrd 22 September 2026" — one flowing line.
         let mut feeder_line = vec![format!("Ex {}", note.feeder_vessel.trim())];
         if !note.feeder_voyage.trim().is_empty() {
             feeder_line.push(format!("Voy {}", note.feeder_voyage.trim()));
@@ -203,7 +203,7 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     }
     if !note.bl_number.trim().is_empty() {
         p.text(L, y, &format!("B/L No. {}", note.bl_number.trim()), BODY, FS, BLACK);
-        // "(179/26   Tuaran)" — the P No. and its free-text descriptor.
+        // "(205/26   Riverside Estate)" — the P No. and its free-text descriptor.
         if !note.p_number.trim().is_empty() {
             let inner = if note.p_descriptor.trim().is_empty() {
                 note.p_number.trim().to_string()

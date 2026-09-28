@@ -40,26 +40,29 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        // Straight off the letterhead and footer of the sample workbook.
+        // Left blank on purpose: the office fills these in once via Settings on
+        // first run, and they're saved to the local SQLite file, never to source
+        // control. Only generic, non-identifying operational defaults are set
+        // here.
         Settings {
-            company_name: "DINAMIK SHIPPING PTE LTD".into(),
-            address_line: "138 Cecil Street #09-03, Cecil Court, Singapore 069538   Tel: (65) 6222 2811  Fax: (65) 6222 2155".into(),
-            registration_no: "Company Registration No. 200403109N".into(),
-            payment_line1: "Payment to be made to DINAMIK SHIPPING PTE LTD by Telegraphic Transfer to our account".into(),
-            payment_line2: "No. 651-869620-001 with OCBC Bank (Singapore), MBFC Branch, Swift Code: OCBCSGSG".into(),
-            signatory_name: "Deanna Lim".into(),
-            signatory_title: "General Manager".into(),
+            company_name: String::new(),
+            address_line: String::new(),
+            registration_no: String::new(),
+            payment_line1: String::new(),
+            payment_line2: String::new(),
+            signatory_name: String::new(),
+            signatory_title: String::new(),
             cover_letter_intro: "We enclose the following Debit notes and will appreciate your early settlement.".into(),
-            default_packing_desc: "Metal  Boxes (MB5)".into(),
-            default_product_desc: "SMR 20 Rubber".into(),
+            default_packing_desc: String::new(),
+            default_product_desc: String::new(),
             default_boxes_per_container: 16.0,
             default_mt_per_container: 20.16,
             default_charge_desc: "Transhipment Charge".into(),
-            default_rate_per_mt: 54.0,
+            default_rate_per_mt: 0.0,
             default_currency: "SGD".into(),
-            email: "dship@singnet.com.sg".into(),
+            email: String::new(),
             cover_letter_customer_id: None,
-            cover_letter_attn_name: "Ms Chia Ching Lian".into(),
+            cover_letter_attn_name: String::new(),
         }
     }
 }
@@ -253,8 +256,8 @@ pub struct CoverLetterSummary {
 #[serde(rename_all = "camelCase")]
 pub struct FeederMatch {
     pub feeder_arrival_date: String,
-    /// The B/L number's vessel/voyage half, e.g. `"JJST2610W"` from
-    /// `"JJST2610W-BKI01"` — the part after the dash is a per-buyer
+    /// The B/L number's vessel/voyage half, e.g. `"MVSS2609W"` from
+    /// `"MVSS2609W-XYZ01"` — the part after the dash is a per-buyer
     /// consignment reference and is never carried over.
     pub bl_prefix: String,
 }
@@ -337,7 +340,7 @@ pub struct DebitNoteInput {
     /// e.g. `153/26`, the P No. beside "Your Invoice No.".
     #[serde(default)]
     pub p_number: String,
-    /// The free-text box beside the P No. (e.g. `Tuaran`) — an origin/estate
+    /// The free-text box beside the P No. (e.g. `Riverside Estate`) — an origin/estate
     /// name that varies per note and has no fixed vocabulary.
     #[serde(default)]
     pub p_descriptor: String,

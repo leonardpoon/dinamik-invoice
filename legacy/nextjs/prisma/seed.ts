@@ -37,27 +37,6 @@ async function main() {
     });
   }
 
-  const existing = await prisma.customer.findFirst({ where: { name: "Sabah Rubber Industry Board" } });
-  if (!existing) {
-    await prisma.customer.create({
-      data: {
-        name: "Sabah Rubber Industry Board",
-        addressLine1: "Level 3, Wisma Pertanian Sabah",
-        addressLine2: "Jalan Tasik",
-        addressLine3: "Luyang (off Jalan Maktab Gaya)",
-        addressLine4: "Kota Kinabalu, Sabah",
-        addressLine5: "East Malaysia",
-        attention: "Ms Chia Ching Lian",
-      },
-    });
-  }
-
-  await prisma.buyer.upsert({
-    where: { name: "Bridgestone Singapore Pte Ltd" },
-    update: {},
-    create: { name: "Bridgestone Singapore Pte Ltd" },
-  });
-
   console.log("Seed complete.");
 }
 

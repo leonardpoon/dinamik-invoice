@@ -144,7 +144,7 @@ export interface DebitNoteInput {
   blNumber: string
   /** e.g. `153/26`, beside "Your Invoice No." */
   pNumber: string
-  /** The free-text box beside the P No. (e.g. `Tuaran`) */
+  /** The free-text box beside the P No. (e.g. `Riverside Estate`) */
   pDescriptor: string
   oceanVessel: string
   oceanVoyage: string

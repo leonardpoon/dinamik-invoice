@@ -5,11 +5,12 @@ webview is only the form.**
 
 ## The rule that matters
 
-`samples/sample.xlsx` is the source of truth for every number and every printed
-layout. `src-tauri/src/calc.rs` is a transcription of its formulas and quotes the
-cell references against each one; the PDF layout code in `src-tauri/src/pdf/`
-quotes the row numbers. If you change either, check it against the workbook and
-keep the references accurate.
+The original Excel workbook (not in this repo — it holds real customer and
+financial data, kept privately) is the source of truth for every number and
+every printed layout. `src-tauri/src/calc.rs` is a transcription of its
+formulas and quotes the cell references against each one; the PDF layout code
+in `src-tauri/src/pdf/` quotes the row numbers. If you change either, check it
+against the workbook and keep the references accurate.
 
 Derived figures (containers, tonnage, charge, cost lines, profit, amount in
 words) are recomputed in `db.rs` on every write. Never let the frontend send a

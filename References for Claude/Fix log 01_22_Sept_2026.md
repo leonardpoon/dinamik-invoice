@@ -113,7 +113,7 @@
 # Cover Letter
 
 1. remove the months to enclose, doesn't make sense to have multi months to send, they will only send once the month ends. Replace it with a navigation menu similar to history, year to month hierarchy 
-2. add one more field which is the name, right now is Ms Chia Ching Lian
+2. add one more field which is the name, right now is a placeholder name
 3. these 2 fields to be constant unless changed, that means even if the user restart, it will take the last used name and customer 
 4. again ensure that the format follows the excel form that I added in the directory. I want everything to be the same, font, font size, horizontal lines, vertical lines etc
 5. everything in the settings menu, company section can be transferred left hand side of the cover letter

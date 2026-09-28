@@ -336,8 +336,8 @@ mod tests {
             total_cost: 0.0,
             total_profit: 0.0,
             months: vec![month("202609", 0.0, 0.0, 0.0, 300.0, 3)],
-            buyers: vec![name_stat("Bridgestone", 300.0, 0.0, 0.0)],
-            vessels: vec![name_stat("Jade Star", 300.0, 0.0, 0.0)],
+            buyers: vec![name_stat("Meridian Tyre", 300.0, 0.0, 0.0)],
+            vessels: vec![name_stat("Coral Star", 300.0, 0.0, 0.0)],
             destinations: vec![],
             products: vec![],
         };

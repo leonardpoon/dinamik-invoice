@@ -176,13 +176,13 @@ mod tests {
     fn renders_a_pdf_even_with_no_notes() {
         let customer = Customer {
             id: 1,
-            name: "Sabah Rubber Industry Board".into(),
+            name: "Nusantara Rubber Board".into(),
             address_line1: "Level 3".into(),
             address_line2: String::new(),
             address_line3: String::new(),
             address_line4: String::new(),
             address_line5: String::new(),
-            attention: "Ms Chia Ching Lian".into(),
+            attention: "Ms Tan Wei Ling".into(),
             active: true,
         };
         let settings = Settings::default();
@@ -190,7 +190,7 @@ mod tests {
             customer: &customer,
             settings: &settings,
             letter_date: "2026-09-30",
-            attn_name: "Ms Chia Ching Lian",
+            attn_name: "Ms Tan Wei Ling",
             dn_numbers: vec![],
         });
         assert!(bytes.starts_with(b"%PDF-1.4"));
@@ -200,7 +200,7 @@ mod tests {
     fn renders_a_pdf_with_notes() {
         let customer = Customer {
             id: 1,
-            name: "Sabah Rubber Industry Board".into(),
+            name: "Nusantara Rubber Board".into(),
             address_line1: String::new(),
             address_line2: String::new(),
             address_line3: String::new(),
@@ -215,7 +215,7 @@ mod tests {
             customer: &customer,
             settings: &settings,
             letter_date: "2026-09-30",
-            attn_name: "Ms Chia Ching Lian",
+            attn_name: "Ms Tan Wei Ling",
             dn_numbers: numbers,
         });
         assert!(bytes.starts_with(b"%PDF-1.4"));
@@ -232,7 +232,7 @@ mod tests {
     fn a_multi_month_enclosure_still_renders() {
         let customer = Customer {
             id: 1,
-            name: "Sabah Rubber Industry Board".into(),
+            name: "Nusantara Rubber Board".into(),
             address_line1: String::new(),
             address_line2: String::new(),
             address_line3: String::new(),
@@ -248,7 +248,7 @@ mod tests {
             customer: &customer,
             settings: &settings,
             letter_date: "2026-09-30",
-            attn_name: "Ms Chia Ching Lian",
+            attn_name: "Ms Tan Wei Ling",
             dn_numbers: numbers,
         });
         assert!(bytes.starts_with(b"%PDF-1.4"));

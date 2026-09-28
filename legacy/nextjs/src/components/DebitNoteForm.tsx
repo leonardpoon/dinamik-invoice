@@ -190,10 +190,10 @@ export default function DebitNoteForm(props: Props) {
               </select>
             </Field>
             <Field label="Your Invoice No." error={fe.customerInvoiceRef} className="col-span-2">
-              <input name="customerInvoiceRef" className="input" value={v.customerInvoiceRef} onChange={set("customerInvoiceRef")} placeholder="13245" />
+              <input name="customerInvoiceRef" className="input" value={v.customerInvoiceRef} onChange={set("customerInvoiceRef")} placeholder="88011" />
             </Field>
             <Field label="Buyer / Consignee" className="col-span-2">
-              <input name="buyerName" list="buyers" className="input" value={v.buyerName} onChange={set("buyerName")} placeholder="Bridgestone Singapore Pte Ltd" />
+              <input name="buyerName" list="buyers" className="input" value={v.buyerName} onChange={set("buyerName")} placeholder="Meridian Tyre Manufacturing Pte Ltd" />
               <datalist id="buyers">
                 {props.buyers.map((b) => (
                   <option key={b} value={b} />
@@ -201,7 +201,7 @@ export default function DebitNoteForm(props: Props) {
               </datalist>
             </Field>
             <Field label="Contract No." className="col-span-2">
-              <input name="contractNo" className="input" value={v.contractNo} onChange={set("contractNo")} placeholder="283230" />
+              <input name="contractNo" className="input" value={v.contractNo} onChange={set("contractNo")} placeholder="410275" />
             </Field>
           </div>
         </section>
@@ -261,23 +261,23 @@ export default function DebitNoteForm(props: Props) {
         <h2 className="card-title">Shipment</h2>
         <div className="p-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           <Field label="Ex (feeder vessel)" className="col-span-2">
-            <input name="feederVessel" list="feederVessels" className="input" value={v.feederVessel} onChange={set("feederVessel")} placeholder="Jade Star" />
+            <input name="feederVessel" list="feederVessels" className="input" value={v.feederVessel} onChange={set("feederVessel")} placeholder="Coral Star" />
             <datalist id="feederVessels">{props.feederVessels.map((x) => <option key={x} value={x} />)}</datalist>
           </Field>
           <Field label="Voyage">
-            <input name="feederVoyage" className="input" value={v.feederVoyage} onChange={set("feederVoyage")} placeholder="2610W" />
+            <input name="feederVoyage" className="input" value={v.feederVoyage} onChange={set("feederVoyage")} placeholder="2609W" />
           </Field>
           <Field label="Arrived">
             <input type="date" name="feederArrivalDate" className="input" value={v.feederArrivalDate} onChange={set("feederArrivalDate")} />
           </Field>
           <Field label="B/L No." className="col-span-2">
-            <input name="blNumber" className="input" value={v.blNumber} onChange={set("blNumber")} placeholder="JJST2610W-BKI01" />
+            <input name="blNumber" className="input" value={v.blNumber} onChange={set("blNumber")} placeholder="MVSS2609W-XYZ01" />
           </Field>
           <Field label="B/L ref (in brackets)" className="col-span-2">
-            <input name="blRef" className="input" value={v.blRef} onChange={set("blRef")} placeholder="179/26 Tuaran" />
+            <input name="blRef" className="input" value={v.blRef} onChange={set("blRef")} placeholder="205/26 Riverside Estate" />
           </Field>
           <Field label="Shipped per (ocean vessel)" className="col-span-2">
-            <input name="oceanVessel" list="oceanVessels" className="input" value={v.oceanVessel} onChange={set("oceanVessel")} placeholder="Zim Mount Vinson" />
+            <input name="oceanVessel" list="oceanVessels" className="input" value={v.oceanVessel} onChange={set("oceanVessel")} placeholder="Pacific Voyager" />
             <datalist id="oceanVessels">{props.oceanVessels.map((x) => <option key={x} value={x} />)}</datalist>
           </Field>
           <Field label="Voyage">
