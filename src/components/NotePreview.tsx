@@ -13,20 +13,19 @@ interface Props {
   note: DebitNoteSummary | null
   onEdit: (id: number) => void
   onDelete: (note: DebitNoteSummary) => void
-  onToggleFiled: (note: DebitNoteSummary) => void
   notify: (message: string, kind: 'error' | 'ok') => void
 }
 
-export default function NotePreview({ note, onEdit, onDelete, onToggleFiled, notify }: Props) {
+export default function NotePreview({ note, onEdit, onDelete, notify }: Props) {
   const [downloading, setDownloading] = useState(false)
 
   const customer = usePdfPreview(
     note ? () => api.notePdfCopy(note.id, 'customer').then(pdfUrl) : null,
-    [note?.id, note?.status],
+    [note?.id],
   )
   const accountant = usePdfPreview(
     note ? () => api.notePdfCopy(note.id, 'accountant').then(pdfUrl) : null,
-    [note?.id, note?.status],
+    [note?.id],
   )
 
   if (!note) {
@@ -70,20 +69,6 @@ export default function NotePreview({ note, onEdit, onDelete, onToggleFiled, not
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => onToggleFiled(note)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold"
-            style={{
-              background: note.status === 'filed' ? '#1a3a2a' : 'var(--secondary)',
-              color: note.status === 'filed' ? '#4caf7a' : 'var(--muted-foreground)',
-              border: `1px solid ${note.status === 'filed' ? '#2a5a3a' : 'var(--border)'}`,
-            }}
-            title={note.status === 'filed' ? 'Mark as not yet filed' : 'Mark as filed'}
-          >
-            <Icon name={note.status === 'filed' ? 'check' : 'archive'} size={11} strokeWidth={2.5} />
-            {note.status === 'filed' ? 'Filed' : 'Mark filed'}
-          </button>
-
           <button onClick={() => onEdit(note.id)} className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }} title="Edit">
             <Icon name="edit" size={12} />
           </button>

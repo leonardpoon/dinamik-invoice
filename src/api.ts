@@ -11,10 +11,12 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import type {
   Analytics,
   CostLine,
+  CoverLetterSummary,
   Customer,
   DebitNote,
   DebitNoteInput,
   DebitNoteSummary,
+  DirectorAnalytics,
   FeederMatch,
   Preset,
   Preview,
@@ -60,19 +62,25 @@ export const api = {
   }) => invoke<Preview>('preview_figures', { input }),
 
   analytics: (yearMonth?: string) => invoke<Analytics>('analytics', { yearMonth: yearMonth ?? null }),
+  directorAnalytics: () => invoke<DirectorAnalytics>('director_analytics'),
+  overviewReportPdf: (yearMonth?: string) => invoke<string>('overview_report_pdf', { yearMonth: yearMonth ?? null }),
+  directorReportPdf: (currency: string) => invoke<string>('director_report_pdf', { currency }),
 
   notePdf: (id: number) => invoke<string>('note_pdf', { id }),
   notePdfCopy: (id: number, copy: 'customer' | 'accountant') =>
     invoke<string>('note_pdf_copy', { id, copy }),
-  filingReportPdf: (yearMonth: string) => invoke<string>('filing_report_pdf', { yearMonth }),
-  coverLetterPdf: (customerId: number, fromYearMonth: string, toYearMonth: string, attnName: string, letterDate?: string) =>
-    invoke<string>('cover_letter_pdf', {
-      customerId,
-      fromYearMonth,
-      toYearMonth,
-      attnName,
-      letterDate: letterDate ?? null,
-    }),
+  filingReportPdf: (yearMonth: string, noteIds: number[]) =>
+    invoke<string>('filing_report_pdf', { yearMonth, noteIds }),
+
+  coverLetterEligibleNotes: (customerId: number) =>
+    invoke<DebitNoteSummary[]>('cover_letter_eligible_notes', { customerId }),
+  coverLetterPreviewPdf: (customerId: number, noteIds: number[], attnName: string, letterDate?: string) =>
+    invoke<string>('cover_letter_preview_pdf', { customerId, noteIds, attnName, letterDate: letterDate ?? null }),
+  saveCoverLetter: (customerId: number, noteIds: number[], attnName: string, letterDate?: string) =>
+    invoke<string>('save_cover_letter', { customerId, noteIds, attnName, letterDate: letterDate ?? null }),
+  listCoverLetters: () => invoke<CoverLetterSummary[]>('list_cover_letters'),
+  coverLetterPdfById: (id: number) => invoke<string>('cover_letter_pdf_by_id', { id }),
+  deleteCoverLetter: (id: number) => invoke<void>('delete_cover_letter', { id }),
 }
 
 /** base64 -> a blob URL an `<iframe>` can render. Caller revokes it. */

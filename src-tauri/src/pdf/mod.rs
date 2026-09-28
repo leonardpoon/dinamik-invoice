@@ -8,5 +8,6 @@
 pub mod cover_letter;
 pub mod debit_note;
 pub mod filing_report;
+pub mod report;
 pub mod truetype;
 pub mod writer;

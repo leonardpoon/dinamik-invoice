@@ -167,6 +167,88 @@ pub struct Preset {
 /// vessel and voyage — the arrival date and the vessel/voyage half of the B/L
 /// number are shared by every buyer on that call, so retyping them is pure
 /// friction. See [`crate::db::Db::feeder_match`].
+/// One month's worth of a figure set — tonnage always, money only when the
+/// caller scoped it to a single currency. See [`crate::commands::analytics`]
+/// and [`crate::commands::director_analytics`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthStat {
+    pub year_month: String,
+    pub label: String,
+    pub count: usize,
+    pub tonnage: f64,
+    pub revenue: f64,
+    pub cost: f64,
+    pub profit: f64,
+}
+
+/// The same figures, grouped by a name (buyer, vessel, destination, product)
+/// instead of a month.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NameStat {
+    pub name: String,
+    pub count: usize,
+    pub tonnage: f64,
+    pub revenue: f64,
+    pub profit: f64,
+}
+
+/// The Overview tab's data — tonnage and counts only, no money. See
+/// [`crate::commands::analytics`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Analytics {
+    pub total_notes: usize,
+    pub total_tonnage: f64,
+    pub total_revenue: f64,
+    pub total_cost: f64,
+    pub total_profit: f64,
+    pub months: Vec<MonthStat>,
+    pub buyers: Vec<NameStat>,
+    pub vessels: Vec<NameStat>,
+    pub destinations: Vec<NameStat>,
+    pub products: Vec<NameStat>,
+}
+
+/// One currency's worth of the director's money figures. Grouped rather than
+/// blended with any other currency the register happens to hold — a SGD +
+/// USD total would just be a wrong number, not a rough one.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrencyAnalytics {
+    pub currency: String,
+    pub total_notes: usize,
+    pub total_tonnage: f64,
+    pub total_revenue: f64,
+    pub total_cost: f64,
+    pub total_profit: f64,
+    pub months: Vec<MonthStat>,
+    pub buyers: Vec<NameStat>,
+}
+
+/// The director Analytics tab's data. See
+/// [`crate::commands::director_analytics`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectorAnalytics {
+    pub currencies: Vec<CurrencyAnalytics>,
+}
+
+/// A saved cover letter, with the DN numbers it enclosed — what the history
+/// browser lists and searches. See [`crate::db::Db::list_cover_letters`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverLetterSummary {
+    pub id: i64,
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub attn_name: String,
+    pub letter_date: String,
+    pub created_at: String,
+    pub dn_numbers: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeederMatch {

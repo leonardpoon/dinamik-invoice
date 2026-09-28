@@ -18,7 +18,7 @@ fn main() {
         dn_date: "2026-09-25".into(),
         customer_id: cid,
         buyer_name: "Bridgestone Singapore Pte Ltd".into(),
-        customer_invoice_ref: "Your Invoice No. 13200".into(),
+        customer_invoice_ref: "13200".into(),
         si_number: "179/26".into(),
         contract_no: "283230".into(),
         boxes: 90.0,
@@ -75,8 +75,11 @@ fn main() {
             letter_date: "2026-09-30",
             attn_name: "Ms Chia Ching Lian",
             dn_numbers: db
-                .dn_numbers_for(cid, &["202608".to_string(), "202609".to_string()])
-                .unwrap(),
+                .cover_letter_eligible_notes(cid)
+                .unwrap()
+                .into_iter()
+                .map(|n| n.dn_number)
+                .collect(),
         }),
     )
     .unwrap();

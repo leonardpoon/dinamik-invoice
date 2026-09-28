@@ -458,7 +458,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                               {p.destination || '— no destination —'}
                             </div>
                             <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 9 }}>
-                              {p.currency} · {p.ratePerMt}/MT{p.productDesc ? ' · ' + p.productDesc : ''}
+                              {p.currency} · {fmt2(p.ratePerMt)}/MT{p.productDesc ? ' · ' + p.productDesc : ''}
                             </div>
                           </div>
                           <button

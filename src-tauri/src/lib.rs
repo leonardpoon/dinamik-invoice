@@ -58,9 +58,17 @@ pub fn run() {
             commands::note_pdf,
             commands::note_pdf_copy,
             commands::filing_report_pdf,
-            commands::cover_letter_pdf,
+            commands::cover_letter_eligible_notes,
+            commands::cover_letter_preview_pdf,
+            commands::save_cover_letter,
+            commands::list_cover_letters,
+            commands::cover_letter_pdf_by_id,
+            commands::delete_cover_letter,
             commands::save_pdf,
             commands::analytics,
+            commands::director_analytics,
+            commands::overview_report_pdf,
+            commands::director_report_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dinamik Invoice");

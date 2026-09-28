@@ -98,6 +98,17 @@ export interface Preset {
   oceanVoyage: string
 }
 
+/** A saved cover letter, with the DN numbers it enclosed. */
+export interface CoverLetterSummary {
+  id: number
+  customerId: number
+  customerName: string
+  attnName: string
+  letterDate: string
+  createdAt: string
+  dnNumbers: string[]
+}
+
 /** A prior note's feeder call, offered back when the vessel + voyage match. */
 export interface FeederMatch {
   feederArrivalDate: string
@@ -235,6 +246,24 @@ export interface Analytics {
   vessels: NameStat[]
   destinations: NameStat[]
   products: NameStat[]
+}
+
+/** One currency's revenue/cost/profit breakdown, for the director's Analytics
+ * tab. Kept separate per currency rather than blended — a SGD + USD total
+ * would just be wrong, not approximate. */
+export interface CurrencyAnalytics {
+  currency: string
+  totalNotes: number
+  totalTonnage: number
+  totalRevenue: number
+  totalCost: number
+  totalProfit: number
+  months: MonthStat[]
+  buyers: NameStat[]
+}
+
+export interface DirectorAnalytics {
+  currencies: CurrencyAnalytics[]
 }
 
 export const emptyCustomer = (): Customer => ({

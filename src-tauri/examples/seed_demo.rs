@@ -28,7 +28,7 @@ fn main() {
             dn_date: (*date).into(),
             customer_id: cid,
             buyer_name: (*buyer).into(),
-            customer_invoice_ref: format!("Your Invoice No. 132{:02}", i + 1),
+            customer_invoice_ref: format!("132{:02}", i + 1),
             si_number: format!("{}/26", 170 + i),
             contract_no: format!("28{}30", 3200 + i as u32),
             boxes: *boxes as f64,

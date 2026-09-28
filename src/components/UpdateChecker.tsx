@@ -1,7 +1,9 @@
-// Checks for an update once per launch and, if one exists, offers to install
-// it — a small pill in the header rather than an interruption, since most
-// launches have nothing to report. The signed manifest and installer come
-// from whatever GitHub Release `.github/workflows/release.yml` last
+// Checks for an update once per launch, before the app itself is shown — a
+// brief loading screen rather than a silent background check, so the office
+// knows why the window took a moment to open. If one exists it then offers to
+// install it as a small pill in the header rather than an interruption, since
+// most launches have nothing to report. The signed manifest and installer
+// come from whatever GitHub Release `.github/workflows/release.yml` last
 // published; see that workflow for how a release gets made.
 
 import { useEffect, useState } from 'react'
@@ -10,17 +12,22 @@ import { check, type Update } from '@tauri-apps/plugin-updater'
 
 import { Icon } from '../ui'
 
-interface Props {
-  notify: (message: string, kind: 'error' | 'ok') => void
-}
+// A PC with no network, or one where the update endpoint is simply
+// unreachable, should never leave the office staring at "Checking for
+// updates…" — five seconds is long enough for a real check to answer and
+// short enough that a launch never feels stuck.
+const CHECK_TIMEOUT_MS = 5000
 
-export default function UpdateChecker({ notify }: Props) {
+/** Runs the update check exactly once per launch. `checking` gates the
+ * app's own loading screen; `update` feeds the header's install pill. */
+export function useUpdateCheck() {
   const [update, setUpdate] = useState<Update | null>(null)
-  const [installing, setInstalling] = useState(false)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    check()
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), CHECK_TIMEOUT_MS))
+    Promise.race([check(), timeout])
       .then((u) => {
         if (!cancelled && u) setUpdate(u)
       })
@@ -28,10 +35,25 @@ export default function UpdateChecker({ notify }: Props) {
         // No network, no release published yet, anything — none of that
         // should ever interrupt opening the app, so it's silently ignored.
       })
+      .finally(() => {
+        if (!cancelled) setChecking(false)
+      })
     return () => {
       cancelled = true
     }
   }, [])
+
+  return { update, checking }
+}
+
+export default function UpdateChecker({
+  update,
+  notify,
+}: {
+  update: Update | null
+  notify: (message: string, kind: 'error' | 'ok') => void
+}) {
+  const [installing, setInstalling] = useState(false)
 
   if (!update) return null
 

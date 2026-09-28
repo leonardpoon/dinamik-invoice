@@ -216,7 +216,6 @@ export default function History({ store, onEdit, onDelete, notify }: Props) {
                                 note={n}
                                 selected={n.id === selectedId}
                                 onSelect={() => setSelectedId(n.id)}
-                                onToggleFiled={() => void store.setFiled(n.id, n.status !== 'filed')}
                                 indent={28}
                               />
                             ))}
@@ -230,13 +229,7 @@ export default function History({ store, onEdit, onDelete, notify }: Props) {
         </div>
       </Panel>
 
-      <NotePreview
-        note={selected}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        onToggleFiled={(n) => void store.setFiled(n.id, n.status !== 'filed')}
-        notify={notify}
-      />
+      <NotePreview note={selected} onEdit={onEdit} onDelete={onDelete} notify={notify} />
     </div>
   )
 }

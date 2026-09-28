@@ -21,6 +21,11 @@ const R: f64 = writer::A4_W - 15.0;
 const LABEL_X: f64 = 118.0;
 const VALUE_X: f64 = 138.0;
 
+/// A tab-keypress-sized gap, used where a field needs to stand apart from the
+/// text ahead of it on the same flowing line (wider than a plain word space,
+/// short of jumping to a fixed column).
+const TAB_GAP: f64 = 10.0;
+
 const BODY: Font = Font::Tahoma;
 const BODY_B: Font = Font::TahomaBold;
 const FS: f64 = 10.0;
@@ -51,10 +56,14 @@ const Y_INVOICE_REF: f64 = 94.0; // row 16
 const Y_BUYER: f64 = 98.5; // row 17
 const Y_CARGO: f64 = 103.0; // row 18
 const Y_FEEDER: f64 = 107.5; // row 19
-const Y_BL: f64 = 112.0; // row 20
-const Y_SHIPPED: f64 = 116.5; // row 21
-const Y_DEST: f64 = 121.0; // row 22
-const Y_BLDATE: f64 = 125.5; // row 23
+const Y_BL: f64 = 112.0; // row 20 (rows 21-23, Shipped per/To/B/L dated, follow at the same step)
+// Rows 19-23 are each this far apart; a line whose field is blank is
+// skipped rather than left as an empty row, so the block below advances by
+// this fixed step from wherever it currently is instead of jumping to the
+// next row's own constant — otherwise a blank *middle* field (e.g. no ocean
+// vessel, but a destination) leaves a double-height gap between the two
+// lines either side of it.
+const CARRIAGE_ROW_H: f64 = Y_BL - Y_FEEDER;
 
 const Y_CHARGE_MIN: f64 = 138.4; // row 26, floor for a short cargo block
 const Y_TOTAL: f64 = 160.6; // row 31, SUM(N26:N28)
@@ -139,47 +148,58 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     p.hline(L, R, Y_DIVIDER_BILLTO, 0.6, BLACK);
 
     // --- reference lines (rows 16-17) ------------------------------------
-    if !note.customer_invoice_ref.trim().is_empty() {
-        p.text(L, Y_INVOICE_REF, note.customer_invoice_ref.trim(), BODY, FS, BLACK);
-    }
-    if !note.buyer_name.trim().is_empty() {
-        p.text(L, Y_BUYER, note.buyer_name.trim(), BODY, FS, BLACK);
+    // "Your Invoice No." is a constant label — the reference HTML always
+    // prints it, even blank; only the number after it is the note's field.
+    p.text(
+        L,
+        Y_INVOICE_REF,
+        &format!("Your Invoice No. {}", note.customer_invoice_ref.trim()),
+        BODY,
+        FS,
+        BLACK,
+    );
+    // Flows as one line, not jumped to the workbook's fixed columns (which
+    // left a large gap behind any shorter-than-expected buyer name) — but
+    // with a tab-sized gap ahead of "Contract No.", not just a single space,
+    // to set the reference number apart from the buyer's name.
+    let buyer = note.buyer_name.trim();
+    if !buyer.is_empty() {
+        p.text(L, Y_BUYER, buyer, BODY, FS, BLACK);
     }
     if let Some((label, value)) = si_or_contract(note) {
-        p.text(LABEL_X, Y_BUYER, label, BODY, FS, BLACK);
-        p.text(VALUE_X + 10.0, Y_BUYER, value, BODY, FS, BLACK);
+        let ref_x = if buyer.is_empty() {
+            L
+        } else {
+            L + writer::text_width(buyer, BODY, FS) + TAB_GAP
+        };
+        p.text(ref_x, Y_BUYER, &format!("{label} {value}"), BODY, FS, BLACK);
     }
 
-    // --- cargo line (row 18): "90  Metal Boxes (MB5)   113.40 M/Tons   SMR 20 Rubber"
-    p.text(L, Y_CARGO, &fmt_qty(note.boxes), BODY, FS, BLACK);
-    p.text(L + 14.0, Y_CARGO, &note.packing_desc, BODY, FS, BLACK);
-    p.text_aligned(LABEL_X - 4.0, Y_CARGO, &fmt2(note.tonnage), BODY, FS, BLACK, Align::Right);
-    p.text(LABEL_X, Y_CARGO, "M/Tons", BODY, FS, BLACK);
-    p.text(VALUE_X + 10.0, Y_CARGO, &note.product_desc, BODY, FS, BLACK);
+    // --- cargo line (row 18): "90 Metal Boxes (MB5) 113.40 M/Tons SMR 20 Rubber"
+    // Same reasoning: one flowing sentence, single-space joins.
+    let cargo_line = format!(
+        "{} {} {} M/Tons {}",
+        fmt_qty(note.boxes),
+        note.packing_desc.trim(),
+        fmt2(note.tonnage),
+        note.product_desc.trim(),
+    );
+    p.text(L, Y_CARGO, &cargo_line, BODY, FS, BLACK);
 
     // --- carriage (rows 19-23) -------------------------------------------
     let mut y = Y_FEEDER;
     if !note.feeder_vessel.trim().is_empty() {
-        p.text(L, y, &format!("Ex {}", note.feeder_vessel.trim()), BODY, FS, BLACK);
-        // "Voy 2610W   Arrd" stays in the left column; the reference HTML puts
-        // the date itself in the right column, level with M/Tons and Contract No.
-        let mut tail = String::new();
+        // "Ex Jade Star Voy 2610W Arrd 22 September 2026" — one flowing line.
+        let mut feeder_line = vec![format!("Ex {}", note.feeder_vessel.trim())];
         if !note.feeder_voyage.trim().is_empty() {
-            tail.push_str(&format!("Voy {}", note.feeder_voyage.trim()));
+            feeder_line.push(format!("Voy {}", note.feeder_voyage.trim()));
         }
         if !note.feeder_arrival_date.trim().is_empty() {
-            if !tail.is_empty() {
-                tail.push_str("    ");
-            }
-            tail.push_str("Arrd");
+            feeder_line.push("Arrd".to_string());
+            feeder_line.push(long_date(&note.feeder_arrival_date));
         }
-        if !tail.is_empty() {
-            p.text(L + 46.0, y, &tail, BODY, FS, BLACK);
-        }
-        if !note.feeder_arrival_date.trim().is_empty() {
-            p.text(LABEL_X, y, &long_date(&note.feeder_arrival_date), BODY, FS, BLACK);
-        }
-        y = Y_BL;
+        p.text(L, y, &feeder_line.join(" "), BODY, FS, BLACK);
+        y += CARRIAGE_ROW_H;
     }
     if !note.bl_number.trim().is_empty() {
         p.text(L, y, &format!("B/L No. {}", note.bl_number.trim()), BODY, FS, BLACK);
@@ -192,7 +212,7 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
             };
             p.text(LABEL_X - 10.0, y, &format!("({inner})"), BODY, FS, BLACK);
         }
-        y = Y_SHIPPED;
+        y += CARRIAGE_ROW_H;
     }
     if !note.ocean_vessel.trim().is_empty() {
         let voy = if note.ocean_voyage.trim().is_empty() {
@@ -201,16 +221,15 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
             format!(" Voy {}", note.ocean_voyage.trim())
         };
         p.text(L, y, &format!("Shipped per {}{}", note.ocean_vessel.trim(), voy), BODY, FS, BLACK);
-        y = Y_DEST;
+        y += CARRIAGE_ROW_H;
     }
     if !note.destination.trim().is_empty() {
         p.text(L, y, &format!("To {}", note.destination.trim()), BODY, FS, BLACK);
-        y = Y_BLDATE;
+        y += CARRIAGE_ROW_H;
     }
     if !note.bl_date.trim().is_empty() {
-        p.text(L, y, "B/L dated", BODY, FS, BLACK);
-        p.text(L + 22.0, y, &long_date(&note.bl_date), BODY, FS, BLACK);
-        y += 4.5;
+        p.text(L, y, &format!("B/L dated {}", long_date(&note.bl_date)), BODY, FS, BLACK);
+        y += CARRIAGE_ROW_H;
     }
 
     // --- charge (row 26) and total (row 31) ------------------------------
@@ -220,25 +239,41 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     let charge_y = y.max(Y_CHARGE_MIN);
     p.hline(L, R, charge_y - 4.5, 0.35, BLACK);
     let sym = currency_symbol(&note.currency);
-    p.text(L, charge_y, &note.charge_desc, BODY, FS, BLACK);
-    p.text(LABEL_X - 28.0, charge_y, &format!("@ {sym}"), BODY, FS, BLACK);
-    p.text_aligned(LABEL_X - 10.0, charge_y, &trim_zeros(note.rate_per_mt), BODY, FS, BLACK, Align::Right);
-    p.text(LABEL_X - 7.0, charge_y, "per M/Ton", BODY, FS, BLACK);
-    p.text(VALUE_X + 6.0, charge_y, sym, BODY, FS, BLACK);
-    p.text_aligned(R, charge_y, &fmt2(note.charge_amount), BODY, FS, BLACK, Align::Right);
+    // "Transhipment Charge" on the left; "@ S$ 54 per M/Ton" centred in the
+    // middle as its own aside; the amount right-aligned at R so it lines up
+    // with the Total row below, same as that row's own S$ / amount pair.
+    p.text(L, charge_y, note.charge_desc.trim(), BODY, FS, BLACK);
+    p.text_aligned(
+        (L + R) / 2.0,
+        charge_y,
+        &format!("@ {sym} {} per M/Ton", fmt2(note.rate_per_mt)),
+        BODY,
+        FS,
+        BLACK,
+        Align::Center,
+    );
+    // "S$" leads the amount as one right-aligned unit, not a separate symbol
+    // sitting off to the left of a gap before the number.
+    p.text_aligned(R, charge_y, &format!("{sym} {}", fmt2(note.charge_amount)), BODY, FS, BLACK, Align::Right);
 
     // Row 31 — SUM(N26:N28), double-ruled the way the sheet closes a total.
-    p.hline(VALUE_X + 4.0, R, Y_TOTAL - 4.6, 0.4, BLACK);
-    p.text(VALUE_X + 6.0, Y_TOTAL, sym, BODY_B, FS, BLACK);
-    p.text_aligned(R, Y_TOTAL, &fmt2(note.total_amount), BODY_B, FS, BLACK, Align::Right);
-    p.line(VALUE_X + 4.0, Y_TOTAL_RULE, R, Y_TOTAL_RULE, 0.4, BLACK);
-    p.line(VALUE_X + 4.0, Y_TOTAL_RULE + 1.0, R, Y_TOTAL_RULE + 1.0, 0.4, BLACK);
+    // The rule above and the double underline below are sized to the total
+    // text itself (+5mm), not stretched out to a fixed column.
+    let total_str = format!("{sym} {}", fmt2(note.total_amount));
+    let total_line_x = R - writer::text_width(&total_str, BODY_B, FS) - 5.0;
+    p.hline(total_line_x, R, Y_TOTAL - 4.6, 0.4, BLACK);
+    p.text_aligned(R, Y_TOTAL, &total_str, BODY_B, FS, BLACK, Align::Right);
+    p.line(total_line_x, Y_TOTAL_RULE, R, Y_TOTAL_RULE, 0.4, BLACK);
+    p.line(total_line_x, Y_TOTAL_RULE + 1.0, R, Y_TOTAL_RULE + 1.0, 0.4, BLACK);
 
     // --- amount in words (row 35) ----------------------------------------
-    p.text(L, Y_WORDS, &currency_words(&note.currency), BODY, FS, BLACK);
-    let words_x = L + 34.0;
-    for (i, line) in writer::wrap(&note.amount_in_words, BODY, FS, R - words_x).iter().enumerate() {
-        p.text(words_x, Y_WORDS + i as f64 * 4.6, line, BODY, FS, BLACK);
+    // "Singapore Dollars Six Thousand One Hundred..." flows as one sentence
+    // and wraps as one paragraph, rather than the amount starting at a fixed
+    // indent regardless of how wide the currency name is.
+    let words_line =
+        format!("{} {}", currency_words(&note.currency).trim_end(), note.amount_in_words.trim());
+    for (i, line) in writer::wrap(&words_line, BODY, FS, R - L).iter().enumerate() {
+        p.text(L, Y_WORDS + i as f64 * 4.6, line, BODY, FS, BLACK);
     }
 
     // --- payment instructions (rows 39-40) -------------------------------
@@ -377,11 +412,6 @@ fn fmt_qty(n: f64) -> String {
     }
 }
 
-pub fn trim_zeros(n: f64) -> String {
-    let s = format!("{:.4}", n);
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() { "0".to_string() } else { s.to_string() }
-}
 
 fn group_thousands(digits: &str) -> String {
     let bytes: Vec<char> = digits.chars().collect();
@@ -473,13 +503,6 @@ mod tests {
         assert_eq!(short_date("2026-09-25"), "25 Sep 2026");
         assert_eq!(short_date("2026-05-01"), "1 May 2026");
         assert_eq!(short_date(""), "");
-    }
-
-    #[test]
-    fn rates_drop_trailing_zeros() {
-        assert_eq!(trim_zeros(54.0), "54");
-        assert_eq!(trim_zeros(25.9), "25.9");
-        assert_eq!(trim_zeros(63.25), "63.25");
     }
 
     #[test]

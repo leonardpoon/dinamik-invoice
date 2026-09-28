@@ -16,7 +16,7 @@ use crate::calc::{
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::*;
-use crate::pdf::{cover_letter, debit_note, filing_report};
+use crate::pdf::{cover_letter, debit_note, filing_report, report};
 use crate::words::amount_to_words;
 
 pub struct AppState {
@@ -256,18 +256,56 @@ pub fn note_pdf_copy(state: State<'_, AppState>, id: i64, copy: String) -> Resul
 }
 
 #[tauri::command]
-pub fn filing_report_pdf(state: State<'_, AppState>, year_month: String) -> Result<String> {
+pub fn filing_report_pdf(state: State<'_, AppState>, year_month: String, note_ids: Vec<i64>) -> Result<String> {
     let db = state.db();
-    let notes = db.notes_in_month(&year_month)?;
+    let notes = db.notes_by_id(&note_ids)?;
     Ok(b64(filing_report::render(&notes, &year_month, &db.settings()?, &today())))
 }
 
+/// The notes a customer still has available to enclose — every note of theirs
+/// that has never been attached to a cover letter, oldest first.
 #[tauri::command]
-pub fn cover_letter_pdf(
+pub fn cover_letter_eligible_notes(
     state: State<'_, AppState>,
     customer_id: i64,
-    from_year_month: String,
-    to_year_month: String,
+) -> Result<Vec<DebitNoteSummary>> {
+    state.db().cover_letter_eligible_notes(customer_id)
+}
+
+/// Renders a draft letter from whatever notes are checked so far, without
+/// saving anything — safe to call on every keystroke the way the live preview
+/// does, since nothing here marks a note as used.
+#[tauri::command]
+pub fn cover_letter_preview_pdf(
+    state: State<'_, AppState>,
+    customer_id: i64,
+    note_ids: Vec<i64>,
+    attn_name: String,
+    letter_date: Option<String>,
+) -> Result<String> {
+    let db = state.db();
+    let customer = db.customer(customer_id)?;
+    let settings = db.settings()?;
+    let numbers = db.dn_numbers_by_id(&note_ids)?;
+    let date = letter_date.unwrap_or_else(today);
+    Ok(b64(cover_letter::render(&cover_letter::CoverLetter {
+        customer: &customer,
+        settings: &settings,
+        letter_date: &date,
+        attn_name: &attn_name,
+        dn_numbers: numbers,
+    })))
+}
+
+/// Finalises a letter: records it and attaches the chosen notes so they can
+/// never be picked for another letter, then returns the same PDF the draft
+/// preview showed. This is the one call in the cover letter flow with a
+/// side effect — everything else is a read.
+#[tauri::command]
+pub fn save_cover_letter(
+    state: State<'_, AppState>,
+    customer_id: i64,
+    note_ids: Vec<i64>,
     attn_name: String,
     letter_date: Option<String>,
 ) -> Result<String> {
@@ -283,9 +321,9 @@ pub fn cover_letter_pdf(
     settings.cover_letter_attn_name = attn_name.clone();
     db.save_settings(&settings)?;
 
-    let months = months_in_range(&from_year_month, &to_year_month);
-    let numbers = db.dn_numbers_for(customer_id, &months)?;
     let date = letter_date.unwrap_or_else(today);
+    let numbers = db.dn_numbers_by_id(&note_ids)?;
+    db.save_cover_letter(customer_id, &attn_name, &date, &note_ids)?;
     Ok(b64(cover_letter::render(&cover_letter::CoverLetter {
         customer: &customer,
         settings: &settings,
@@ -295,72 +333,34 @@ pub fn cover_letter_pdf(
     })))
 }
 
-/// Every `YYYYMM` from `from` to `to` inclusive, in order, swapping the two if
-/// given in reverse. A cover letter used to be pinned to a single month; the
-/// client asked for the ability to enclose a run of months in one letter
-/// again, with the printed list still grouped one column per month (done in
-/// `cover_letter::render` by reading the month back out of each DN number).
-fn months_in_range(from: &str, to: &str) -> Vec<String> {
-    fn parse(ym: &str) -> Option<(i32, u32)> {
-        if ym.len() != 6 {
-            return None;
-        }
-        let y = ym[0..4].parse().ok()?;
-        let m: u32 = ym[4..6].parse().ok()?;
-        if !(1..=12).contains(&m) {
-            return None;
-        }
-        Some((y, m))
-    }
-    let (Some(a), Some(b)) = (parse(from), parse(to)) else {
-        return vec![from.to_string()];
-    };
-    let (mut y, mut m) = a.min(b);
-    let end = a.max(b);
-    let mut out = Vec::new();
-    loop {
-        out.push(format!("{y:04}{m:02}"));
-        if (y, m) == end {
-            break;
-        }
-        m += 1;
-        if m > 12 {
-            m = 1;
-            y += 1;
-        }
-    }
-    out
+/// Every past cover letter, for the history browser.
+#[tauri::command]
+pub fn list_cover_letters(state: State<'_, AppState>) -> Result<Vec<CoverLetterSummary>> {
+    state.db().list_cover_letters()
 }
 
-#[cfg(test)]
-mod months_in_range_tests {
-    use super::months_in_range;
+/// Re-renders a saved letter's exact PDF, straight off what was recorded when
+/// it was generated.
+#[tauri::command]
+pub fn cover_letter_pdf_by_id(state: State<'_, AppState>, id: i64) -> Result<String> {
+    let db = state.db();
+    let (customer, attn_name, letter_date) = db.cover_letter(id)?;
+    let settings = db.settings()?;
+    let numbers = db.cover_letter_dn_numbers(id)?;
+    Ok(b64(cover_letter::render(&cover_letter::CoverLetter {
+        customer: &customer,
+        settings: &settings,
+        letter_date: &letter_date,
+        attn_name: &attn_name,
+        dn_numbers: numbers,
+    })))
+}
 
-    #[test]
-    fn a_single_month_is_just_itself() {
-        assert_eq!(months_in_range("202609", "202609"), vec!["202609"]);
-    }
-
-    #[test]
-    fn spans_a_year_boundary() {
-        assert_eq!(
-            months_in_range("202511", "202602"),
-            vec!["202511", "202512", "202601", "202602"]
-        );
-    }
-
-    #[test]
-    fn a_reversed_range_still_reads_forward() {
-        assert_eq!(
-            months_in_range("202609", "202508"),
-            months_in_range("202508", "202609")
-        );
-    }
-
-    #[test]
-    fn malformed_input_falls_back_to_the_first_month_alone() {
-        assert_eq!(months_in_range("bad", "202609"), vec!["bad"]);
-    }
+/// Deletes a saved letter and frees the notes it enclosed back into
+/// `cover_letter_eligible_notes`.
+#[tauri::command]
+pub fn delete_cover_letter(state: State<'_, AppState>, id: i64) -> Result<()> {
+    state.db().delete_cover_letter(id)
 }
 
 /// Write a PDF the UI already holds to a path the user chose in a save dialog.
@@ -375,44 +375,7 @@ pub fn save_pdf(path: String, data_base64: String) -> Result<String> {
 
 // ----- analytics ------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MonthStat {
-    pub year_month: String,
-    pub label: String,
-    pub count: usize,
-    pub tonnage: f64,
-    pub revenue: f64,
-    pub cost: f64,
-    pub profit: f64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NameStat {
-    pub name: String,
-    pub count: usize,
-    pub tonnage: f64,
-    pub revenue: f64,
-    pub profit: f64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Analytics {
-    pub total_notes: usize,
-    pub total_tonnage: f64,
-    pub total_revenue: f64,
-    pub total_cost: f64,
-    pub total_profit: f64,
-    pub months: Vec<MonthStat>,
-    pub buyers: Vec<NameStat>,
-    pub vessels: Vec<NameStat>,
-    pub destinations: Vec<NameStat>,
-    pub products: Vec<NameStat>,
-}
-
-/// Rolled up in Rust rather than in the browser so the Analytics tab stays a
+/// Rolled up in Rust rather than in the browser so the Overview tab stays a
 /// pure renderer and the numbers agree with the filing report's totals.
 #[tauri::command]
 pub fn analytics(state: State<'_, AppState>, year_month: Option<String>) -> Result<Analytics> {
@@ -484,4 +447,115 @@ pub fn analytics(state: State<'_, AppState>, year_month: Option<String>) -> Resu
         destinations: by(|n| n.destination.clone()),
         products: by(|n| n.product_desc.clone()),
     })
+}
+
+/// Revenue, cost and profit for the director's Analytics tab — split by
+/// currency for the same reason `analytics` above never surfaces a blended
+/// money total. In practice the register is almost always a single currency,
+/// so this is invisible until it isn't.
+#[tauri::command]
+pub fn director_analytics(state: State<'_, AppState>) -> Result<DirectorAnalytics> {
+    let all = state.db().summaries()?;
+
+    let mut by_currency: std::collections::BTreeMap<String, Vec<&DebitNoteSummary>> = Default::default();
+    for n in &all {
+        by_currency.entry(n.currency.clone()).or_default().push(n);
+    }
+
+    let mut currencies: Vec<CurrencyAnalytics> = by_currency
+        .into_iter()
+        .map(|(currency, notes)| {
+            let mut keys: Vec<String> = notes
+                .iter()
+                .map(|n| n.year_month.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            keys.reverse();
+            let months = keys
+                .into_iter()
+                .map(|ym| {
+                    let slice: Vec<&&DebitNoteSummary> =
+                        notes.iter().filter(|n| n.year_month == ym).collect();
+                    MonthStat {
+                        label: cover_letter::month_label(&ym),
+                        year_month: ym,
+                        count: slice.len(),
+                        tonnage: calc::round3(slice.iter().map(|n| n.tonnage).sum()),
+                        revenue: calc::round2(slice.iter().map(|n| n.total_amount).sum()),
+                        cost: calc::round2(slice.iter().map(|n| n.total_cost).sum()),
+                        profit: calc::round2(slice.iter().map(|n| n.profit).sum()),
+                    }
+                })
+                .collect();
+
+            let mut buyer_map: std::collections::HashMap<String, NameStat> = Default::default();
+            for n in &notes {
+                let name = if n.buyer_name.trim().is_empty() {
+                    "—".to_string()
+                } else {
+                    n.buyer_name.clone()
+                };
+                let e = buyer_map.entry(name.clone()).or_insert(NameStat {
+                    name,
+                    count: 0,
+                    tonnage: 0.0,
+                    revenue: 0.0,
+                    profit: 0.0,
+                });
+                e.count += 1;
+                e.tonnage += n.tonnage;
+                e.revenue += n.total_amount;
+                e.profit += n.profit;
+            }
+            let mut buyers: Vec<NameStat> = buyer_map.into_values().collect();
+            for b in &mut buyers {
+                b.tonnage = calc::round3(b.tonnage);
+                b.revenue = calc::round2(b.revenue);
+                b.profit = calc::round2(b.profit);
+            }
+            buyers.sort_by(|a, b| b.revenue.partial_cmp(&a.revenue).unwrap_or(std::cmp::Ordering::Equal));
+
+            CurrencyAnalytics {
+                total_notes: notes.len(),
+                total_tonnage: calc::round3(notes.iter().map(|n| n.tonnage).sum()),
+                total_revenue: calc::round2(notes.iter().map(|n| n.total_amount).sum()),
+                total_cost: calc::round2(notes.iter().map(|n| n.total_cost).sum()),
+                total_profit: calc::round2(notes.iter().map(|n| n.profit).sum()),
+                months,
+                buyers,
+                currency,
+            }
+        })
+        .collect();
+    currencies.sort_by(|a, b| b.total_revenue.partial_cmp(&a.total_revenue).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(DirectorAnalytics { currencies })
+}
+
+/// A black-and-white, one-page A4 printout of the Overview tab, for whatever
+/// scope (all time or one month) the screen currently has selected.
+#[tauri::command]
+pub fn overview_report_pdf(state: State<'_, AppState>, year_month: Option<String>) -> Result<String> {
+    let data = analytics(state.clone(), year_month.clone())?;
+    let settings = state.db().settings()?;
+    let scope_label = match year_month.as_deref() {
+        Some(ym) if !ym.is_empty() && ym != "all" => cover_letter::month_label(ym),
+        _ => "All time".to_string(),
+    };
+    Ok(b64(report::render_overview(&data, &settings, &scope_label, &today())))
+}
+
+/// The same, for the director's Analytics tab — one currency at a time, same
+/// as the screen.
+#[tauri::command]
+pub fn director_report_pdf(state: State<'_, AppState>, currency: String) -> Result<String> {
+    let data = director_analytics(state.clone())?;
+    let settings = state.db().settings()?;
+    let scoped = data
+        .currencies
+        .into_iter()
+        .find(|c| c.currency == currency)
+        .ok_or_else(|| AppError::NotFound(format!("no figures for {currency}")))?;
+    Ok(b64(report::render_director(&scoped, &settings, &today())))
 }

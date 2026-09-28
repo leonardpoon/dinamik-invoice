@@ -1,8 +1,12 @@
-// The Sample UI's shell: one top bar, five tabs, a persistent settings rail.
+// The Sample UI's shell: one top bar, several tabs, a persistent settings rail.
 //
-// The Cover Letter tab is the addition — it is the second sheet of the workbook
+// The Cover Letter tab is an addition — it is the second sheet of the workbook
 // this app replaces, so it belongs alongside the notes rather than hidden in a
-// menu.
+// menu. Director Analytics is a second addition, pinned at the far right of
+// the nav rather than mixed in with the daily-use tabs: the money-and-forecasts
+// tab, password-gated (see the component itself — the gate never caches
+// across a visit, on purpose) so it doesn't sit in front of everyone who opens
+// the app. Overview (the original dashboard) stays open to all.
 
 import { useCallback, useEffect, useState } from 'react'
 
@@ -13,21 +17,23 @@ import Current from './components/Current'
 import Filing from './components/Filing'
 import History from './components/History'
 import NoteForm from './components/NoteForm'
+import Overview from './components/Overview'
 import SettingsPanel from './components/SettingsPanel'
-import UpdateChecker from './components/UpdateChecker'
+import UpdateChecker, { useUpdateCheck } from './components/UpdateChecker'
 import { useStore } from './store'
 import type { DebitNote, DebitNoteSummary } from './types'
 import { ConfirmDialog, Icon, Spinner, Toast, currentYearMonth } from './ui'
 
-type Tab = 'dashboard' | 'new' | 'current' | 'history' | 'filing' | 'cover'
+type Tab = 'dashboard' | 'new' | 'current' | 'history' | 'filing' | 'analytics' | 'cover'
 
 const NAV: { id: Tab; label: string; icon: string }[] = [
-  { id: 'dashboard', label: 'Analytics', icon: 'chart' },
+  { id: 'dashboard', label: 'Overview', icon: 'chart' },
   { id: 'new', label: 'Create Debit Note', icon: 'filePlus' },
   { id: 'current', label: 'Current', icon: 'calendar' },
   { id: 'history', label: 'History', icon: 'clock' },
   { id: 'filing', label: 'Filing', icon: 'fileText' },
   { id: 'cover', label: 'Cover Letter', icon: 'mail' },
+  { id: 'analytics', label: 'Director Analytics', icon: 'trending' },
 ]
 
 // Applied before first paint so the window never flashes the wrong theme.
@@ -35,6 +41,7 @@ document.documentElement.classList.toggle('light', localStorage.getItem('theme')
 
 export default function App() {
   const store = useStore()
+  const { update, checking: checkingUpdate } = useUpdateCheck()
   const [tab, setTab] = useState<Tab>('dashboard')
   const [formKey, setFormKey] = useState(0)
   const [editing, setEditing] = useState<DebitNote | null>(null)
@@ -85,12 +92,11 @@ export default function App() {
   }
 
   const currentCount = store.notes.filter((n) => n.yearMonth === currentYearMonth()).length
-  const unfiled = store.notes.filter((n) => n.status !== 'filed').length
 
-  if (!store.ready) {
+  if (!store.ready || checkingUpdate) {
     return (
       <div className="flex items-center justify-center h-screen" style={{ background: 'var(--background)' }}>
-        <Spinner label="Opening the register…" />
+        <Spinner label={!store.ready ? 'Opening the register…' : 'Checking for updates…'} />
       </div>
     )
   }
@@ -128,12 +134,7 @@ export default function App() {
         <nav className="flex items-center gap-0.5">
           {NAV.map((n) => {
             const active = tab === n.id
-            const badge =
-              n.id === 'current' && currentCount > 0
-                ? currentCount
-                : n.id === 'filing' && unfiled > 0
-                  ? unfiled
-                  : null
+            const badge = n.id === 'current' && currentCount > 0 ? currentCount : null
             return (
               <button
                 key={n.id}
@@ -166,11 +167,7 @@ export default function App() {
         </nav>
 
         <div className="flex items-center gap-3 shrink-0">
-          <UpdateChecker notify={notify} />
-          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)' }}>
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#4caf7a' }} />
-            {store.notes.length} records
-          </div>
+          <UpdateChecker update={update} notify={notify} />
           <button
             onClick={() => setLight((l) => !l)}
             className="w-8 h-8 rounded flex items-center justify-center transition-colors"
@@ -186,11 +183,12 @@ export default function App() {
         <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {tab === 'dashboard' && (
             <div className="flex-1 min-w-0 overflow-auto">
-              <Analytics
+              <Overview
                 notes={store.notes}
                 onNew={goNew}
                 onOpenCurrent={() => setTab('current')}
                 onEdit={startEdit}
+                notify={notify}
               />
             </div>
           )}
@@ -224,6 +222,15 @@ export default function App() {
           {tab === 'history' && <History store={store} onEdit={startEdit} onDelete={setConfirmDelete} notify={notify} />}
 
           {tab === 'filing' && <Filing store={store} notify={notify} />}
+
+          {/* Remounted fresh every time the tab is opened — no `key` needed
+              since the conditional render already unmounts it on the way out
+              — so the password gate never caches across a visit. */}
+          {tab === 'analytics' && (
+            <div className="flex-1 min-w-0 overflow-auto flex flex-col">
+              <Analytics notify={notify} />
+            </div>
+          )}
 
           {tab === 'cover' && <CoverLetter store={store} notify={notify} />}
         </div>

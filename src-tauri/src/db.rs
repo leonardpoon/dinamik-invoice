@@ -189,6 +189,22 @@ impl Db {
                 sort_order    INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_cost_note ON debit_note_cost(debit_note_id);
+
+            CREATE TABLE IF NOT EXISTS cover_letter (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id INTEGER NOT NULL REFERENCES customer(id),
+                attn_name   TEXT NOT NULL DEFAULT '',
+                letter_date TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_cover_letter_customer ON cover_letter(customer_id);
+
+            CREATE TABLE IF NOT EXISTS cover_letter_note (
+                cover_letter_id INTEGER NOT NULL REFERENCES cover_letter(id) ON DELETE CASCADE,
+                debit_note_id   INTEGER NOT NULL REFERENCES debit_note(id) ON DELETE CASCADE,
+                PRIMARY KEY (cover_letter_id, debit_note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cln_note ON cover_letter_note(debit_note_id);
             "#,
         )?;
 
@@ -945,62 +961,165 @@ impl Db {
              JOIN customer c ON c.id = n.customer_id
              ORDER BY n.year_month DESC, n.running_no DESC, n.id DESC",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(DebitNoteSummary {
-                id: r.get("id")?,
-                dn_number: r.get("dn_number")?,
-                year_month: r.get("year_month")?,
-                dn_date: r.get("dn_date")?,
-                status: NoteStatus::parse(&r.get::<_, String>("status")?),
-                customer_name: r.get("customer_name")?,
-                buyer_name: r.get("buyer_name")?,
-                customer_invoice_ref: r.get("customer_invoice_ref")?,
-                si_number: r.get("si_number")?,
-                contract_no: r.get("contract_no")?,
-                bl_number: r.get("bl_number")?,
-                p_number: r.get("p_number")?,
-                feeder_vessel: r.get("feeder_vessel")?,
-                ocean_vessel: r.get("ocean_vessel")?,
-                destination: r.get("destination")?,
-                product_desc: r.get("product_desc")?,
-                shipment_type: ShipmentType::parse(&r.get::<_, String>("shipment_type")?),
-                boxes: r.get("boxes")?,
-                containers: r.get("containers")?,
-                tonnage: r.get("tonnage")?,
-                currency: r.get("currency")?,
-                total_amount: r.get("total_amount")?,
-                total_cost: r.get("total_cost")?,
-                profit: r.get("profit")?,
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
-    }
-
-    /// DN numbers for a customer across the given months, for the cover letter's
-    /// enclosed list. Always read from the database so the letter cannot drift
-    /// from what was actually issued.
-    pub fn dn_numbers_for(&self, customer_id: i64, months: &[String]) -> Result<Vec<String>> {
-        if months.is_empty() {
-            return Ok(Vec::new());
-        }
-        let placeholders = months.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!(
-            "SELECT dn_number FROM debit_note
-             WHERE customer_id = ? AND year_month IN ({placeholders})
-             ORDER BY year_month, running_no"
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
-        let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(customer_id)];
-        for m in months {
-            args.push(Box::new(m.clone()));
-        }
-        let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
-        let rows = stmt.query_map(refs.as_slice(), |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map([], row_to_summary)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn notes_in_month(&self, year_month: &str) -> Result<Vec<DebitNoteSummary>> {
         Ok(self.summaries()?.into_iter().filter(|s| s.year_month == year_month).collect())
+    }
+
+    /// Exactly the notes the caller picked, in issue order — what the Filing
+    /// tab's own checklist selection prints, the same pattern the cover
+    /// letter's note selection uses.
+    pub fn notes_by_id(&self, ids: &[i64]) -> Result<Vec<DebitNoteSummary>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT n.id, n.dn_number, n.year_month, n.dn_date, n.status,
+                    c.name AS customer_name, n.buyer_name, n.customer_invoice_ref, n.si_number,
+                    n.contract_no, n.bl_number, n.p_number, n.feeder_vessel, n.ocean_vessel,
+                    n.destination, n.product_desc, n.shipment_type,
+                    n.boxes, n.containers, n.tonnage, n.currency, n.total_amount,
+                    n.total_cost, n.profit
+             FROM debit_note n
+             JOIN customer c ON c.id = n.customer_id
+             WHERE n.id IN ({placeholders})
+             ORDER BY n.year_month, n.running_no"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_to_summary)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// One customer's notes that have never been attached to a cover letter —
+    /// the pool a new letter can draw from. Read fresh every time, straight off
+    /// `cover_letter_note`, so a note an earlier letter already enclosed can
+    /// never be picked again by accident.
+    pub fn cover_letter_eligible_notes(&self, customer_id: i64) -> Result<Vec<DebitNoteSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT n.id, n.dn_number, n.year_month, n.dn_date, n.status,
+                    c.name AS customer_name, n.buyer_name, n.customer_invoice_ref, n.si_number,
+                    n.contract_no, n.bl_number, n.p_number, n.feeder_vessel, n.ocean_vessel,
+                    n.destination, n.product_desc, n.shipment_type,
+                    n.boxes, n.containers, n.tonnage, n.currency, n.total_amount,
+                    n.total_cost, n.profit
+             FROM debit_note n
+             JOIN customer c ON c.id = n.customer_id
+             WHERE n.customer_id = ?1
+               AND NOT EXISTS (SELECT 1 FROM cover_letter_note cln WHERE cln.debit_note_id = n.id)
+             ORDER BY n.year_month, n.running_no",
+        )?;
+        let rows = stmt.query_map(params![customer_id], row_to_summary)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Chosen note ids resolved to their DN numbers, in issue order — for a
+    /// draft letter's live preview, before anything is saved.
+    pub fn dn_numbers_by_id(&self, note_ids: &[i64]) -> Result<Vec<String>> {
+        if note_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = note_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT dn_number FROM debit_note WHERE id IN ({placeholders})
+             ORDER BY year_month, running_no"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(note_ids.iter()), |r| {
+            r.get::<_, String>(0)
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Records a generated cover letter and attaches the notes it enclosed, so
+    /// they drop out of `cover_letter_eligible_notes` for good — the fix for
+    /// the spreadsheet letting the same note go out on two letters by accident.
+    pub fn save_cover_letter(
+        &self,
+        customer_id: i64,
+        attn_name: &str,
+        letter_date: &str,
+        note_ids: &[i64],
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO cover_letter (customer_id, attn_name, letter_date, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![customer_id, attn_name, letter_date, now_iso()],
+        )?;
+        let id = self.conn.last_insert_rowid();
+        for note_id in note_ids {
+            self.conn.execute(
+                "INSERT INTO cover_letter_note (cover_letter_id, debit_note_id) VALUES (?1, ?2)",
+                params![id, note_id],
+            )?;
+        }
+        Ok(id)
+    }
+
+    /// Every past cover letter, newest first, with the DN numbers it enclosed —
+    /// what the history browser searches and lists.
+    pub fn list_cover_letters(&self) -> Result<Vec<CoverLetterSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT cl.id, cl.customer_id, c.name AS customer_name, cl.attn_name,
+                    cl.letter_date, cl.created_at
+             FROM cover_letter cl JOIN customer c ON c.id = cl.customer_id
+             ORDER BY cl.letter_date DESC, cl.id DESC",
+        )?;
+        let mut letters = stmt
+            .query_map([], |r| {
+                Ok(CoverLetterSummary {
+                    id: r.get("id")?,
+                    customer_id: r.get("customer_id")?,
+                    customer_name: r.get("customer_name")?,
+                    attn_name: r.get("attn_name")?,
+                    letter_date: r.get("letter_date")?,
+                    created_at: r.get("created_at")?,
+                    dn_numbers: Vec::new(),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for letter in &mut letters {
+            letter.dn_numbers = self.cover_letter_dn_numbers(letter.id)?;
+        }
+        Ok(letters)
+    }
+
+    /// The exact DN numbers a saved cover letter enclosed, in issue order.
+    pub fn cover_letter_dn_numbers(&self, cover_letter_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT n.dn_number FROM cover_letter_note cln
+             JOIN debit_note n ON n.id = cln.debit_note_id
+             WHERE cln.cover_letter_id = ?1
+             ORDER BY n.year_month, n.running_no",
+        )?;
+        let rows = stmt.query_map(params![cover_letter_id], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A saved letter's own customer, addressee and date, for re-rendering the
+    /// identical PDF from the history browser.
+    pub fn cover_letter(&self, id: i64) -> Result<(Customer, String, String)> {
+        let (customer_id, attn_name, letter_date): (i64, String, String) = self
+            .conn
+            .query_row(
+                "SELECT customer_id, attn_name, letter_date FROM cover_letter WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::NotFound(format!("cover letter {id}")))?;
+        Ok((self.customer(customer_id)?, attn_name, letter_date))
+    }
+
+    /// Deletes a saved letter and frees the notes it enclosed back into
+    /// `cover_letter_eligible_notes` — the office's undo for picking the wrong
+    /// notes.
+    pub fn delete_cover_letter(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM cover_letter WHERE id = ?1", params![id])?;
+        Ok(())
     }
 }
 
@@ -1111,6 +1230,35 @@ fn row_to_customer(r: &Row<'_>) -> rusqlite::Result<Customer> {
     })
 }
 
+fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<DebitNoteSummary> {
+    Ok(DebitNoteSummary {
+        id: r.get("id")?,
+        dn_number: r.get("dn_number")?,
+        year_month: r.get("year_month")?,
+        dn_date: r.get("dn_date")?,
+        status: NoteStatus::parse(&r.get::<_, String>("status")?),
+        customer_name: r.get("customer_name")?,
+        buyer_name: r.get("buyer_name")?,
+        customer_invoice_ref: r.get("customer_invoice_ref")?,
+        si_number: r.get("si_number")?,
+        contract_no: r.get("contract_no")?,
+        bl_number: r.get("bl_number")?,
+        p_number: r.get("p_number")?,
+        feeder_vessel: r.get("feeder_vessel")?,
+        ocean_vessel: r.get("ocean_vessel")?,
+        destination: r.get("destination")?,
+        product_desc: r.get("product_desc")?,
+        shipment_type: ShipmentType::parse(&r.get::<_, String>("shipment_type")?),
+        boxes: r.get("boxes")?,
+        containers: r.get("containers")?,
+        tonnage: r.get("tonnage")?,
+        currency: r.get("currency")?,
+        total_amount: r.get("total_amount")?,
+        total_cost: r.get("total_cost")?,
+        profit: r.get("profit")?,
+    })
+}
+
 fn row_to_note(r: &Row<'_>) -> rusqlite::Result<DebitNote> {
     Ok(DebitNote {
         id: r.get("id")?,
@@ -1187,7 +1335,7 @@ mod tests {
             dn_date: "2026-09-25".into(),
             customer_id,
             buyer_name: "Bridgestone Singapore Pte Ltd".into(),
-            customer_invoice_ref: "Your Invoice No. 13200".into(),
+            customer_invoice_ref: "13200".into(),
             si_number: "179/26".into(),
             contract_no: "283230".into(),
             boxes: 90.0,
@@ -1363,20 +1511,34 @@ mod tests {
     }
 
     #[test]
-    fn cover_letter_numbers_come_from_the_register() {
+    fn saved_cover_letter_notes_drop_out_of_the_eligible_pool() {
         let mut db = Db::open_in_memory().unwrap();
         let cid = db.customers().unwrap()[0].id;
-        db.create_debit_note(&sample_input(cid)).unwrap();
-        db.create_debit_note(&sample_input(cid)).unwrap();
+        let id1 = db.create_debit_note(&sample_input(cid)).unwrap();
+        let id2 = db.create_debit_note(&sample_input(cid)).unwrap();
         let mut other = sample_input(cid);
         other.year_month = "202610".into();
-        db.create_debit_note(&other).unwrap();
+        let id3 = db.create_debit_note(&other).unwrap();
 
-        let list = db.dn_numbers_for(cid, &["202609".to_string()]).unwrap();
-        assert_eq!(list, vec!["DN202609-01", "DN202609-02"]);
-        let both =
-            db.dn_numbers_for(cid, &["202609".to_string(), "202610".to_string()]).unwrap();
-        assert_eq!(both.len(), 3);
+        let eligible = db.cover_letter_eligible_notes(cid).unwrap();
+        assert_eq!(eligible.iter().map(|n| n.id).collect::<Vec<_>>(), vec![id1, id2, id3]);
+
+        let numbers = db.dn_numbers_by_id(&[id1, id2]).unwrap();
+        assert_eq!(numbers, vec!["DN202609-01", "DN202609-02"]);
+
+        let letter_id = db.save_cover_letter(cid, "Ms Chia Ching Lian", "2026-09-30", &[id1, id2]).unwrap();
+        assert_eq!(db.cover_letter_dn_numbers(letter_id).unwrap(), vec!["DN202609-01", "DN202609-02"]);
+
+        let still_eligible = db.cover_letter_eligible_notes(cid).unwrap();
+        assert_eq!(still_eligible.iter().map(|n| n.id).collect::<Vec<_>>(), vec![id3]);
+
+        let letters = db.list_cover_letters().unwrap();
+        assert_eq!(letters.len(), 1);
+        assert_eq!(letters[0].dn_numbers, vec!["DN202609-01", "DN202609-02"]);
+
+        db.delete_cover_letter(letter_id).unwrap();
+        let freed = db.cover_letter_eligible_notes(cid).unwrap();
+        assert_eq!(freed.iter().map(|n| n.id).collect::<Vec<_>>(), vec![id1, id2, id3]);
     }
 
     #[test]

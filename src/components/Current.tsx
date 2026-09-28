@@ -49,13 +49,12 @@ export default function Current({ store, onEdit, onNew, onDelete, notify }: Prop
   }, [notes, selectedId])
 
   const selected = notes.find((n) => n.id === selectedId) ?? null
-  const filed = notes.filter((n) => n.status === 'filed').length
   const total = notes.reduce((s, n) => s + n.totalAmount, 0)
 
   async function handleReport() {
     setReporting(true)
     try {
-      const b64 = await api.filingReportPdf(yearMonth)
+      const b64 = await api.filingReportPdf(yearMonth, notes.map((n) => n.id))
       const saved = await savePdf(b64, `filing-register-${yearMonth}.pdf`)
       if (saved) notify(`Filing register for ${monthLabel(yearMonth)} saved`, 'ok')
     } catch (e) {
@@ -71,7 +70,7 @@ export default function Current({ store, onEdit, onNew, onDelete, notify }: Prop
         <PanelHeader
           eyebrow="Current Period"
           title={monthLabel(yearMonth)}
-          sub={`${notes.length} debit note${notes.length === 1 ? '' : 's'} · ${filed} filed`}
+          sub={`${notes.length} debit note${notes.length === 1 ? '' : 's'}`}
         >
           <input
             type="month"
@@ -99,7 +98,6 @@ export default function Current({ store, onEdit, onNew, onDelete, notify }: Prop
                 note={n}
                 selected={n.id === selectedId}
                 onSelect={() => setSelectedId(n.id)}
-                onToggleFiled={() => void store.setFiled(n.id, n.status !== 'filed')}
               />
             ))
           )}
@@ -125,13 +123,7 @@ export default function Current({ store, onEdit, onNew, onDelete, notify }: Prop
         )}
       </Panel>
 
-      <NotePreview
-        note={selected}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        onToggleFiled={(n) => void store.setFiled(n.id, n.status !== 'filed')}
-        notify={notify}
-      />
+      <NotePreview note={selected} onEdit={onEdit} onDelete={onDelete} notify={notify} />
     </div>
   )
 }
@@ -140,13 +132,11 @@ export function NoteRow({
   note,
   selected,
   onSelect,
-  onToggleFiled,
   indent = 0,
 }: {
   note: DebitNoteSummary
   selected: boolean
   onSelect: () => void
-  onToggleFiled?: () => void
   indent?: number
 }) {
   return (
@@ -161,36 +151,17 @@ export function NoteRow({
         borderLeft: `3px solid ${selected ? 'var(--primary)' : 'transparent'}`,
       }}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span
-            className="text-xs font-semibold truncate"
-            style={{ fontFamily: 'var(--font-jetbrains)', color: selected ? 'var(--primary)' : 'var(--foreground)', fontSize: 11 }}
-          >
-            {note.dnNumber}
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span
+          className="text-xs font-semibold truncate"
+          style={{ fontFamily: 'var(--font-jetbrains)', color: selected ? 'var(--primary)' : 'var(--foreground)', fontSize: 11 }}
+        >
+          {note.dnNumber}
+        </span>
+        {note.customerInvoiceRef && (
+          <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 10 }}>
+            {note.customerInvoiceRef}
           </span>
-          {note.customerInvoiceRef && (
-            <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 10 }}>
-              {note.customerInvoiceRef}
-            </span>
-          )}
-        </div>
-
-        {onToggleFiled && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleFiled()
-            }}
-            className="w-5 h-5 rounded flex items-center justify-center shrink-0"
-            style={{
-              color: note.status === 'filed' ? '#4caf7a' : 'var(--muted-foreground)',
-              background: note.status === 'filed' ? 'rgba(76,175,122,0.12)' : 'transparent',
-            }}
-            title={note.status === 'filed' ? 'Filed — click to unfile' : 'Mark as filed'}
-          >
-            <Icon name={note.status === 'filed' ? 'check' : 'archive'} size={11} strokeWidth={2.5} />
-          </button>
         )}
       </div>
 
