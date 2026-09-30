@@ -96,6 +96,9 @@ export interface Preset {
   boxes: number
   oceanVessel: string
   oceanVoyage: string
+  feederVessel: string
+  feederVoyage: string
+  pDescriptor: string
 }
 
 /** A saved cover letter, with the DN numbers it enclosed. */
@@ -142,7 +145,7 @@ export interface DebitNoteInput {
   feederVoyage: string
   feederArrivalDate: string
   blNumber: string
-  /** e.g. `153/26`, beside "Your Invoice No." */
+  /** e.g. `P153/26`, printed after the first carrier's B/L number */
   pNumber: string
   /** The free-text box beside the P No. (e.g. `Riverside Estate`) */
   pDescriptor: string

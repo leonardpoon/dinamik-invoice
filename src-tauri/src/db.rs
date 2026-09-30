@@ -221,9 +221,36 @@ impl Db {
             "ALTER TABLE preset ADD COLUMN boxes REAL NOT NULL DEFAULT 0",
             "ALTER TABLE preset ADD COLUMN ocean_vessel TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE preset ADD COLUMN ocean_voyage TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE preset ADD COLUMN feeder_vessel TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE preset ADD COLUMN feeder_voyage TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE preset ADD COLUMN p_descriptor TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE debit_note ADD COLUMN shipment_type TEXT NOT NULL DEFAULT 'CONTAINER'",
         ] {
             let _ = self.conn.execute(stmt, []);
+        }
+
+        // Presets predating the first-carrier and factory-code columns are
+        // backfilled from the latest note for the same buyer + destination, so
+        // they copy over without waiting for another note to be saved. Only
+        // blank fields are filled; a no-op once every preset has values.
+        for (col, src) in [
+            ("feeder_vessel", "feeder_vessel"),
+            ("feeder_voyage", "feeder_voyage"),
+            ("p_descriptor", "p_descriptor"),
+        ] {
+            let _ = self.conn.execute(
+                &format!(
+                    "UPDATE preset SET {col} = COALESCE((
+                         SELECT n.{src} FROM debit_note n
+                         WHERE lower(trim(n.buyer_name)) = lower(trim(preset.buyer_name))
+                           AND lower(trim(n.destination)) = lower(trim(preset.destination))
+                           AND trim(n.{src}) <> ''
+                         ORDER BY n.year_month DESC, n.running_no DESC, n.id DESC LIMIT 1
+                     ), '')
+                     WHERE trim({col}) = ''"
+                ),
+                [],
+            );
         }
 
         // `rate_default` gained a `shipment_type` dimension so Container and
@@ -577,7 +604,8 @@ impl Db {
         let mut stmt = self.conn.prepare(
             "SELECT id, customer_id, buyer_name, destination, si_number, product_desc,
                     packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container,
-                    contract_no, boxes, ocean_vessel, ocean_voyage
+                    contract_no, boxes, ocean_vessel, ocean_voyage, feeder_vessel, feeder_voyage,
+                    p_descriptor
              FROM preset ORDER BY buyer_name, destination",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -597,6 +625,9 @@ impl Db {
                 boxes: r.get("boxes")?,
                 ocean_vessel: r.get("ocean_vessel")?,
                 ocean_voyage: r.get("ocean_voyage")?,
+                feeder_vessel: r.get("feeder_vessel")?,
+                feeder_voyage: r.get("feeder_voyage")?,
+                p_descriptor: r.get("p_descriptor")?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -609,8 +640,9 @@ impl Db {
         self.conn.execute(
             "INSERT INTO preset (customer_id, buyer_name, destination, si_number, product_desc,
                  packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container, contract_no,
-                 boxes, ocean_vessel, ocean_voyage)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 boxes, ocean_vessel, ocean_voyage, feeder_vessel, feeder_voyage,
+                 p_descriptor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(buyer_name, destination) DO UPDATE SET
                  customer_id = excluded.customer_id,
                  si_number = excluded.si_number,
@@ -623,7 +655,10 @@ impl Db {
                  contract_no = excluded.contract_no,
                  boxes = excluded.boxes,
                  ocean_vessel = excluded.ocean_vessel,
-                 ocean_voyage = excluded.ocean_voyage",
+                 ocean_voyage = excluded.ocean_voyage,
+                 feeder_vessel = excluded.feeder_vessel,
+                 feeder_voyage = excluded.feeder_voyage,
+                 p_descriptor = excluded.p_descriptor",
             params![
                 p.customer_id,
                 p.buyer_name.trim(),
@@ -639,6 +674,9 @@ impl Db {
                 p.boxes,
                 p.ocean_vessel,
                 p.ocean_voyage,
+                p.feeder_vessel,
+                p.feeder_voyage,
+                p.p_descriptor,
             ],
         )?;
         Ok(())
@@ -1627,6 +1665,9 @@ mod tests {
             boxes: 90.0,
             ocean_vessel: "Pacific Voyager".into(),
             ocean_voyage: "12E".into(),
+            feeder_vessel: "Coral Star".into(),
+            feeder_voyage: "2609W".into(),
+            p_descriptor: "Riverside Estate".into(),
         })
         .unwrap();
 
@@ -1635,6 +1676,9 @@ mod tests {
         assert_eq!(presets[0].boxes, 90.0);
         assert_eq!(presets[0].ocean_vessel, "Pacific Voyager");
         assert_eq!(presets[0].ocean_voyage, "12E");
+        assert_eq!(presets[0].feeder_vessel, "Coral Star");
+        assert_eq!(presets[0].feeder_voyage, "2609W");
+        assert_eq!(presets[0].p_descriptor, "Riverside Estate");
     }
 
     #[test]

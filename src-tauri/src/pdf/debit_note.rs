@@ -19,7 +19,8 @@ use crate::pdf::writer::{self, Align, Font, Page, Pdf, BLACK, GREY};
 const L: f64 = 18.0;
 const R: f64 = writer::A4_W - 15.0;
 const LABEL_X: f64 = 118.0;
-const VALUE_X: f64 = 138.0;
+/// Sits just clear of the widest label ("Date  :"), so the value hugs its label.
+const VALUE_X: f64 = 131.0;
 
 /// A tab-keypress-sized gap, used where a field needs to stand apart from the
 /// text ahead of it on the same flowing line (wider than a plain word space,
@@ -202,15 +203,19 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
         y += CARRIAGE_ROW_H;
     }
     if !note.bl_number.trim().is_empty() {
-        p.text(L, y, &format!("B/L No. {}", note.bl_number.trim()), BODY, FS, BLACK);
-        // "(205/26   Riverside Estate)" — the P No. and its free-text descriptor.
+        let bl_line = format!("B/L No. {}", note.bl_number.trim());
+        p.text(L, y, &bl_line, BODY, FS, BLACK);
+        // "(P205/26   Riverside Estate)" — the P No. and its free-text descriptor,
+        // flowing on from the B/L number with two tabs between, not a fixed column.
         if !note.p_number.trim().is_empty() {
-            let inner = if note.p_descriptor.trim().is_empty() {
+            let p_x = L + writer::text_width(&bl_line, BODY, FS) + 2.0 * TAB_GAP;
+            let desc = note.p_descriptor.trim();
+            let inner = if desc.is_empty() {
                 note.p_number.trim().to_string()
             } else {
-                format!("{}   {}", note.p_number.trim(), note.p_descriptor.trim())
+                format!("{} {desc}", note.p_number.trim())
             };
-            p.text(LABEL_X - 10.0, y, &format!("({inner})"), BODY, FS, BLACK);
+            p.text(p_x, y, &format!("({inner})"), BODY, FS, BLACK);
         }
         y += CARRIAGE_ROW_H;
     }
@@ -236,8 +241,10 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     // The workbook anchors the charge low on the sheet so the totals always
     // land in the same place whatever the cargo block's height; a long
     // address pushes past the anchor rather than the other way round.
-    let charge_y = y.max(Y_CHARGE_MIN);
-    p.hline(L, R, charge_y - 4.5, 0.35, BLACK);
+    let rule_y = y.max(Y_CHARGE_MIN) - 4.5;
+    p.hline(L, R, rule_y, 0.35, BLACK);
+    // One blank line between the rule and the charge line beneath it.
+    let charge_y = rule_y + 4.5 + CARRIAGE_ROW_H;
     let sym = currency_symbol(&note.currency);
     // "Transhipment Charge" on the left; "@ S$ 54 per M/Ton" centred in the
     // middle as its own aside; the amount right-aligned at R so it lines up
@@ -296,8 +303,8 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
     // stack of notes can be signed without hunting for the line. The
     // workbook itself never names a signatory here — that only appears on
     // the cover letter — so just "for <company>" and the rule.
-    p.text(VALUE_X - 20.0, Y_SIG_FOR, &format!("for {}", s.company_name), BODY, FS, BLACK);
-    p.hline(VALUE_X - 20.0, R, Y_SIG_LINE, 0.4, BLACK);
+    p.text(LABEL_X, Y_SIG_FOR, &format!("for {}", s.company_name), BODY, FS, BLACK);
+    p.hline(LABEL_X, R, Y_SIG_LINE, 0.4, BLACK);
     p.text(L, Y_EOE, "E & O E", BODY, FS, BLACK);
 
     // --- accountant-only: row 52 marker, then rows 55-61 -----------------

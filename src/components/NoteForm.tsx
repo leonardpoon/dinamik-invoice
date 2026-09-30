@@ -50,15 +50,24 @@ const NEEDS_FILLING: React.CSSProperties = {
  * lane usually repeats these month to month, but each is still exactly the
  * kind of thing that quietly changes (box count drifting from 16 to 15, a
  * voyage number rolling over), so none of them are copied silently. */
-const PRESET_FIELDS = ['buyerName', 'destination', 'boxes', 'oceanVessel', 'oceanVoyage'] as const
+const PRESET_FIELDS = [
+  'buyerName',
+  'destination',
+  'boxes',
+  'oceanVessel',
+  'oceanVoyage',
+  'feederVessel',
+  'feederVoyage',
+  'pDescriptor',
+] as const
 
 /** Fields that are always blank on a new note, however good the preset is —
  * and, per the fix log, the ones that should be flagged red after a preset
  * is applied, since a copied value here is very unlikely to still be right.
- * The feeder vessel/voyage/arrival date and B/L number are handled instead by
- * the feeder-match lookup below, which fires off what's typed, not the preset. */
+ * The feeder vessel/voyage now come from the preset; the arrival date and B/L
+ * number are handled by the feeder-match lookup below, which fires off the
+ * vessel and voyage once they are filled. */
 const ALWAYS_BLANK = [
-  'feederVessel',
   'feederArrivalDate',
   'blNumber',
   'blDate',
@@ -157,6 +166,12 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
   )
   const [autoNumber, setAutoNumber] = useState(!editing)
   const [suggested, setSuggested] = useState('')
+  // P No. is `P<number>/<yy>`: the number is typed, the `/yy` follows the note's
+  // year. Ticking "Enter manually" frees the whole value for anything else.
+  const [pManual, setPManual] = useState(() => (editing ? !parseAutoP(editing.pNumber, editing.dnDate) && !!editing.pNumber.trim() : false))
+  const [pSeq, setPSeq] = useState(() => (editing ? splitP(editing.pNumber).seq : ''))
+  // The year half, only used while manual; auto always takes the note's year.
+  const [pYearText, setPYearText] = useState(() => (editing ? splitP(editing.pNumber).year : ''))
   const [errors, setErrors] = useState<Errors>({})
   const [highlighted, setHighlighted] = useState<string[]>([])
   const [blanks, setBlanks] = useState<string[]>([])
@@ -198,7 +213,25 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
     return () => {
       cancelled = true
     }
-  }, [form.yearMonth, autoNumber, store.notes.length])
+  }, [form.yearMonth, autoNumber, store.notes, activePreset])
+
+  // Keep the stored P No. in step with the number and the year while auto.
+  const pYear = yearSuffix(form.dnDate)
+  useEffect(() => {
+    const year = pManual ? pYearText.trim() : pYear
+    const composed = pSeq.trim() ? `P${pSeq.trim()}${year ? `/${year}` : ''}` : ''
+    setForm((f) => (f.pNumber === composed ? f : { ...f, pNumber: composed }))
+  }, [pManual, pSeq, pYearText, pYear])
+
+  // The next free number for the year, offered as the placeholder.
+  const nextP = useMemo(() => {
+    let max = 0
+    for (const n of store.notes) {
+      const seq = parseAutoP(n.pNumber, `20${pYear}-01-01`)
+      if (seq) max = Math.max(max, parseInt(seq, 10))
+    }
+    return String(max + 1)
+  }, [store.notes, pYear])
 
   // Live figures, priced by the same Rust that will store them.
   const cargoKey = useDebounced(
@@ -335,9 +368,13 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
       boxes: p.boxes || f.boxes,
       oceanVessel: p.oceanVessel || f.oceanVessel,
       oceanVoyage: p.oceanVoyage || f.oceanVoyage,
+      // The first carrier is copied the same way as the outward one; the
+      // feeder-match lookup then offers back its arrival date and B/L prefix.
+      feederVessel: p.feederVessel || f.feederVessel,
+      feederVoyage: p.feederVoyage || f.feederVoyage,
+      pDescriptor: p.pDescriptor || f.pDescriptor,
       // SI/Contract No. are per-shipment references, not per-buyer — a copied
       // one is more likely stale than right, so the preset leaves them blank.
-      // The feeder vessel/voyage belong to the shipment too, never the preset.
     }))
     setHighlighted([...PRESET_FIELDS])
     setBlanks([...ALWAYS_BLANK])
@@ -409,6 +446,9 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
           boxes: form.boxes,
           oceanVessel: form.oceanVessel,
           oceanVoyage: form.oceanVoyage,
+          feederVessel: form.feederVessel,
+          feederVoyage: form.feederVoyage,
+          pDescriptor: form.pDescriptor,
         })
         onSaved(created.id, created.dnNumber)
       }
@@ -423,6 +463,9 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
     setForm({ ...emptyInput(), ...defaultsFrom(store) })
     setDnSeq('')
     setAutoNumber(true)
+    setPSeq('')
+    setPYearText('')
+    setPManual(false)
     setErrors({})
     setHighlighted([])
     setBlanks([])
@@ -601,7 +644,6 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                         borderRadius: 6,
                         overflow: 'hidden',
                         background: 'var(--secondary)',
-                        opacity: autoNumber ? 0.65 : 1,
                       }}
                     >
                       <span
@@ -644,7 +686,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                           setErrors((x) => ({ ...x, dnSeq: undefined }))
                         }}
                         placeholder="01"
-                        style={{ border: 'none', borderRadius: 0, background: 'transparent', flex: 1, minWidth: 0 }}
+                        style={{ border: 'none', borderRadius: 0, background: 'transparent', flex: 1, minWidth: 0, opacity: autoNumber ? 0.65 : 1 }}
                       />
                     </div>
                     <label className="flex items-center gap-2 text-xs px-0.5" style={{ color: 'var(--muted-foreground)' }}>
@@ -660,7 +702,12 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                 </Field>
 
                 <Field label="Date" required error={errors.dnDate}>
-                  <input type="date" value={form.dnDate} onChange={(e) => set('dnDate', e.target.value)} style={ring('dnDate')} />
+                  <input
+                    type="date"
+                    value={form.dnDate}
+                    onChange={(e) => set('dnDate', e.target.value)}
+                    style={ring('dnDate')}
+                  />
                 </Field>
               </div>
 
@@ -677,15 +724,66 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                 </Field>
 
                 <Field label="P No.">
-                  <MonoInput
-                    value={form.pNumber}
-                    onChange={(e) => set('pNumber', e.target.value)}
-                    style={ring('pNumber')}
-                  />
+                  <div className="flex flex-col gap-1.5">
+                    {/* Same three segments either way — P | number | /year — so
+                        the dividers hold still; manual just unlocks the year. */}
+                    <div
+                      className="flex items-center"
+                      style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--secondary)', ...ring('pNumber') }}
+                    >
+                      <span
+                        className="px-3 py-2 text-xs font-bold shrink-0 select-none"
+                        style={{ fontFamily: 'var(--font-jetbrains)', color: 'var(--primary)', borderRight: '1px solid var(--border)' }}
+                      >
+                        P
+                      </span>
+                      <MonoInput
+                        value={pSeq}
+                        inputMode={pManual ? undefined : 'numeric'}
+                        placeholder={nextP}
+                        onChange={(e) => {
+                          setPSeq(pManual ? e.target.value : e.target.value.replace(/\D/g, ''))
+                          setBlanks((b) => b.filter((k) => k !== 'pNumber'))
+                        }}
+                        style={{ border: 'none', borderRadius: 0, background: 'transparent', flex: 1, minWidth: 0 }}
+                      />
+                      <span
+                        className="pl-2 py-2 text-xs shrink-0 select-none"
+                        style={{ fontFamily: 'var(--font-jetbrains)', color: 'var(--muted-foreground)', borderLeft: '1px solid var(--border)', paddingLeft: 8 }}
+                      >
+                        /
+                      </span>
+                      <MonoInput
+                        value={pManual ? pYearText : pYear}
+                        disabled={!pManual}
+                        onChange={(e) => setPYearText(e.target.value)}
+                        style={{ border: 'none', borderRadius: 0, background: 'transparent', width: 52, paddingLeft: 2, paddingRight: 8, opacity: pManual ? 1 : 0.65 }}
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-xs px-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                      <input
+                        type="checkbox"
+                        checked={pManual}
+                        onChange={(e) => {
+                          setPManual(e.target.checked)
+                          // Carry the year across, so the manual half starts as
+                          // what auto was showing rather than blank.
+                          if (e.target.checked) setPYearText(pYear)
+                          else setPSeq((s) => s.replace(/\D/g, ''))
+                        }}
+                        style={{ width: 'auto', padding: 0 }}
+                      />
+                      Enter manually
+                    </label>
+                  </div>
                 </Field>
 
                 <Field label="Factory Code">
-                  <input value={form.pDescriptor} onChange={(e) => set('pDescriptor', e.target.value)} />
+                  <input
+                    value={form.pDescriptor}
+                    onChange={(e) => set('pDescriptor', e.target.value)}
+                    style={ring('pDescriptor')}
+                  />
                 </Field>
               </div>
 
@@ -923,6 +1021,26 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
       </div>
     </div>
   )
+}
+
+/** Two-digit year of an ISO date, falling back to the current year. */
+function yearSuffix(iso: string): string {
+  const y = /^\d{4}/.test(iso) ? iso.slice(2, 4) : String(new Date().getFullYear()).slice(2)
+  return y
+}
+
+/** The number out of a `P119/26` (or legacy `119/26`) whose year matches the
+ * note's — undefined for anything else, which the form treats as manual. */
+/** `P119/26` -> { seq: '119', year: '26' }; a leading P and the slash are optional. */
+function splitP(pNumber: string): { seq: string; year: string } {
+  const t = pNumber.trim().replace(/^P/i, '')
+  const i = t.lastIndexOf('/')
+  return i < 0 ? { seq: t, year: '' } : { seq: t.slice(0, i).trim(), year: t.slice(i + 1).trim() }
+}
+
+function parseAutoP(pNumber: string, dnDate: string): string | undefined {
+  const m = /^P?(\d+)\/(\d{2})$/i.exec(pNumber.trim())
+  return m && m[2] === yearSuffix(dnDate) ? m[1] : undefined
 }
 
 function defaultsFrom(store: Store): Partial<DebitNoteInput> {

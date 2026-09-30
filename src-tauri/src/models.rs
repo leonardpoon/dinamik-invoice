@@ -164,6 +164,15 @@ pub struct Preset {
     pub ocean_vessel: String,
     #[serde(default)]
     pub ocean_voyage: String,
+    /// First carrier, copied the same way as the outward vessel/voyage. Only
+    /// the name and voyage — the arrival date and B/L number stay per-shipment.
+    #[serde(default)]
+    pub feeder_vessel: String,
+    #[serde(default)]
+    pub feeder_voyage: String,
+    /// The factory code (`DebitNote::p_descriptor`), which follows the buyer.
+    #[serde(default)]
+    pub p_descriptor: String,
 }
 
 /// A prior note's feeder call, offered back when a new note names the same
