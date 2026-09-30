@@ -1,6 +1,6 @@
 [package]
 name = "dinamik-invoice"
-version = "0.4.2"
+version = "0.4.3"
 description = "Debit note generator for Dinamik Shipping Pte Ltd"
 edition = "2021"
 rust-version = "1.77"
