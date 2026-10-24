@@ -77,6 +77,7 @@ function matches(n: DebitNoteSummary, q: string): boolean {
     n.oceanVessel,
     n.destination,
     n.productDesc,
+    n.stickyNote,
     monthName,
     n.yearMonth.slice(0, 4),
   ].some((v) => (v ?? '').toLowerCase().includes(q))
@@ -118,7 +119,7 @@ export default function History({ store, onEdit, onDelete, notify }: Props) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Vessel, buyer, B/L, port, month…"
+              placeholder="Vessel, buyer, B/L, port, sticky note…"
               style={{ border: 'none', background: 'transparent', flex: 1, fontSize: 12, padding: '6px 0' }}
             />
             {query && (
@@ -216,6 +217,7 @@ export default function History({ store, onEdit, onDelete, notify }: Props) {
                                 note={n}
                                 selected={n.id === selectedId}
                                 onSelect={() => setSelectedId(n.id)}
+                                onSticky={store.setSticky}
                                 indent={28}
                               />
                             ))}

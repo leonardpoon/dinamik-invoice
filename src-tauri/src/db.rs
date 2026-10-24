@@ -225,6 +225,8 @@ impl Db {
             "ALTER TABLE preset ADD COLUMN feeder_voyage TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE preset ADD COLUMN p_descriptor TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE debit_note ADD COLUMN shipment_type TEXT NOT NULL DEFAULT 'CONTAINER'",
+            "ALTER TABLE debit_note ADD COLUMN sticky_note TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE debit_note ADD COLUMN sticky_at TEXT NOT NULL DEFAULT ''",
         ] {
             let _ = self.conn.execute(stmt, []);
         }
@@ -981,6 +983,22 @@ impl Db {
         Ok(())
     }
 
+    /// The post-it beside a note's number. A scratch memo for the office, never
+    /// printed and not part of the note's figures, so it has its own write and
+    /// leaves `updated_at` alone. `sticky_at` stamps when the note was first
+    /// written: later edits keep it, clearing the note resets it.
+    pub fn set_sticky_note(&self, id: i64, text: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE debit_note SET sticky_note = ?2,
+                    sticky_at = CASE WHEN ?2 = '' THEN ''
+                                     WHEN sticky_at = '' THEN ?3
+                                     ELSE sticky_at END
+             WHERE id = ?1",
+            params![id, text.trim(), now_iso()],
+        )?;
+        Ok(())
+    }
+
     pub fn debit_note(&self, id: i64) -> Result<DebitNote> {
         let mut note = self
             .conn
@@ -1024,7 +1042,7 @@ impl Db {
                     n.contract_no, n.bl_number, n.p_number, n.feeder_vessel, n.ocean_vessel,
                     n.destination, n.product_desc, n.shipment_type,
                     n.boxes, n.containers, n.tonnage, n.currency, n.total_amount,
-                    n.total_cost, n.profit
+                    n.total_cost, n.profit, n.sticky_note, n.sticky_at
              FROM debit_note n
              JOIN customer c ON c.id = n.customer_id
              ORDER BY n.year_month DESC, n.running_no DESC, n.id DESC",
@@ -1051,7 +1069,7 @@ impl Db {
                     n.contract_no, n.bl_number, n.p_number, n.feeder_vessel, n.ocean_vessel,
                     n.destination, n.product_desc, n.shipment_type,
                     n.boxes, n.containers, n.tonnage, n.currency, n.total_amount,
-                    n.total_cost, n.profit
+                    n.total_cost, n.profit, n.sticky_note, n.sticky_at
              FROM debit_note n
              JOIN customer c ON c.id = n.customer_id
              WHERE n.id IN ({placeholders})
@@ -1073,7 +1091,7 @@ impl Db {
                     n.contract_no, n.bl_number, n.p_number, n.feeder_vessel, n.ocean_vessel,
                     n.destination, n.product_desc, n.shipment_type,
                     n.boxes, n.containers, n.tonnage, n.currency, n.total_amount,
-                    n.total_cost, n.profit
+                    n.total_cost, n.profit, n.sticky_note, n.sticky_at
              FROM debit_note n
              JOIN customer c ON c.id = n.customer_id
              WHERE n.customer_id = ?1
@@ -1324,6 +1342,8 @@ fn row_to_summary(r: &Row<'_>) -> rusqlite::Result<DebitNoteSummary> {
         total_amount: r.get("total_amount")?,
         total_cost: r.get("total_cost")?,
         profit: r.get("profit")?,
+        sticky_note: r.get("sticky_note")?,
+        sticky_at: r.get("sticky_at")?,
     })
 }
 
@@ -1567,6 +1587,24 @@ mod tests {
         assert!(n.filed_at.is_some());
         db.set_filed(id, false).unwrap();
         assert!(db.debit_note(id).unwrap().filed_at.is_none());
+    }
+
+    #[test]
+    fn sticky_note_survives_an_edit_and_shows_in_summaries() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        let input = sample_input(cid);
+        let id = db.create_debit_note(&input).unwrap();
+        assert_eq!(db.summaries().unwrap()[0].sticky_note, "");
+        db.set_sticky_note(id, "  chase B/L from feeder  ").unwrap();
+        assert_eq!(db.summaries().unwrap()[0].sticky_note, "chase B/L from feeder");
+        let stamp = db.summaries().unwrap()[0].sticky_at.clone();
+        assert!(!stamp.is_empty());
+        db.set_sticky_note(id, "chase B/L from feeder, again").unwrap();
+        assert_eq!(db.summaries().unwrap()[0].sticky_at, stamp);
+        db.set_sticky_note(id, "chase B/L from feeder").unwrap();
+        db.update_debit_note(id, &input).unwrap();
+        assert_eq!(db.summaries().unwrap()[0].sticky_note, "chase B/L from feeder");
     }
 
     #[test]

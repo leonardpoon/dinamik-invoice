@@ -146,6 +146,8 @@ mod tests {
             total_amount: 6123.6,
             total_cost: 3793.97,
             profit: 2329.63,
+            sticky_note: String::new(),
+            sticky_at: String::new(),
         }
     }
 

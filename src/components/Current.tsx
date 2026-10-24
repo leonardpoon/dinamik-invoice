@@ -20,6 +20,7 @@ import {
   toMonthInput,
 } from '../ui'
 import NotePreview from './NotePreview'
+import StickyNote from './StickyNote'
 
 interface Props {
   store: Store
@@ -98,6 +99,7 @@ export default function Current({ store, onEdit, onNew, onDelete, notify }: Prop
                 note={n}
                 selected={n.id === selectedId}
                 onSelect={() => setSelectedId(n.id)}
+                onSticky={store.setSticky}
               />
             ))
           )}
@@ -132,11 +134,13 @@ export function NoteRow({
   note,
   selected,
   onSelect,
+  onSticky,
   indent = 0,
 }: {
   note: DebitNoteSummary
   selected: boolean
   onSelect: () => void
+  onSticky: (id: number, text: string) => Promise<void>
   indent?: number
 }) {
   return (
@@ -152,12 +156,15 @@ export function NoteRow({
       }}
     >
       <div className="flex flex-col gap-0.5 min-w-0">
-        <span
-          className="text-xs font-semibold truncate"
-          style={{ fontFamily: 'var(--font-jetbrains)', color: selected ? 'var(--primary)' : 'var(--foreground)', fontSize: 11 }}
-        >
-          {note.dnNumber}
-        </span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span
+            className="text-xs font-semibold truncate"
+            style={{ fontFamily: 'var(--font-jetbrains)', color: selected ? 'var(--primary)' : 'var(--foreground)', fontSize: 11 }}
+          >
+            {note.dnNumber}
+          </span>
+          <StickyNote text={note.stickyNote} stamp={note.stickyAt} label={note.dnNumber} onSave={(t) => onSticky(note.id, t)} />
+        </div>
         {note.customerInvoiceRef && (
           <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 10 }}>
             {note.customerInvoiceRef}

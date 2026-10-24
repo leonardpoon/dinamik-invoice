@@ -40,6 +40,7 @@ export interface Store {
   updateNote: (id: number, input: DebitNoteInput) => Promise<void>
   deleteNote: (id: number) => Promise<void>
   setFiled: (id: number, filed: boolean) => Promise<void>
+  setSticky: (id: number, text: string) => Promise<void>
 }
 
 export function useStore(): Store {
@@ -142,6 +143,11 @@ export function useStore(): Store {
 
     deleteNote: async (id) => {
       await api.deleteNote(id)
+      await refreshNotes()
+    },
+
+    setSticky: async (id, text) => {
+      await api.setNoteSticky(id, text)
       await refreshNotes()
     },
 

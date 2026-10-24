@@ -52,6 +52,7 @@ export const api = {
   createNote: (input: DebitNoteInput) => invoke<DebitNote>('create_note', { input }),
   updateNote: (id: number, input: DebitNoteInput) => invoke<DebitNote>('update_note', { id, input }),
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
+  setNoteSticky: (id: number, text: string) => invoke<void>('set_note_sticky', { id, text }),
   setNoteFiled: (id: number, filed: boolean) => invoke<DebitNote>('set_note_filed', { id, filed }),
 
   previewFigures: (input: {

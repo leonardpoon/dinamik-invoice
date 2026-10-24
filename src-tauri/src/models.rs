@@ -465,4 +465,8 @@ pub struct DebitNoteSummary {
     pub total_amount: f64,
     pub total_cost: f64,
     pub profit: f64,
+    /// Office memo shown as a post-it beside the DN number; never printed.
+    pub sticky_note: String,
+    /// When the sticky note was first written (ISO, local time); empty if none.
+    pub sticky_at: String,
 }

@@ -206,6 +206,10 @@ export interface DebitNoteSummary {
   totalAmount: number
   totalCost: number
   profit: number
+  /** Office memo shown as a post-it beside the DN number; never printed. */
+  stickyNote: string
+  /** When the sticky note was first written (ISO, local time); empty if none. */
+  stickyAt: string
 }
 
 export interface CostSummary {

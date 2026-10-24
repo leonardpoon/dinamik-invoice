@@ -55,6 +55,7 @@ pub fn run() {
             commands::update_note,
             commands::delete_note,
             commands::set_note_filed,
+            commands::set_note_sticky,
             commands::preview_figures,
             commands::note_pdf,
             commands::note_pdf_copy,

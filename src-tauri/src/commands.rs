@@ -178,6 +178,11 @@ pub fn set_note_filed(state: State<'_, AppState>, id: i64, filed: bool) -> Resul
     db.debit_note(id)
 }
 
+#[tauri::command]
+pub fn set_note_sticky(state: State<'_, AppState>, id: i64, text: String) -> Result<()> {
+    state.db().set_sticky_note(id, &text)
+}
+
 /// Live figures for the form, so the preview never has to re-implement the
 /// spreadsheet in TypeScript — the same Rust code prices the draft and the row.
 #[derive(Debug, Serialize)]
