@@ -9,8 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 
 import { errorMessage } from '../api'
 import type { Store } from '../store'
-import type { Customer, RateDefault, Settings, ShipmentType } from '../types'
-import { BASIS_LABEL, CATEGORY_LABEL, COST_CATEGORIES, emptyCustomer } from '../types'
+import type { Customer, Preset, RateDefault, Settings, ShipmentType } from '../types'
+import { BASIS_LABEL, CATEGORY_LABEL, COST_CATEGORIES, costKey, emptyCustomer } from '../types'
 import type { CostBasis, CostCategory } from '../types'
 import { Icon, fmt2 } from '../ui'
 
@@ -550,26 +550,122 @@ function CustomersTab({ store, notify }: Props) {
         ) : (
           <div className="flex flex-col gap-1">
             {store.presets.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 px-2 py-2 rounded" style={{ background: 'var(--secondary)' }}>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium truncate">{p.buyerName}</div>
-                  <div className="text-xs truncate" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 9 }}>
-                    {p.destination || '—'} · {p.currency} {fmt2(p.ratePerMt)}/MT
-                  </div>
-                </div>
-                <button
-                  onClick={() => void store.deletePreset(p.id)}
-                  className="w-6 h-6 rounded flex items-center justify-center shrink-0"
-                  style={{ color: '#e05252' }}
-                  title="Remove preset"
-                >
-                  <Icon name="trash" size={11} />
-                </button>
-              </div>
+              <PresetRow key={p.id} preset={p} store={store} notify={notify} />
             ))}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** A saved preset, with its own list of cost lines to switch off — the
+ * lines are matched by category and code, so one list serves both rate cards. */
+function PresetRow({
+  preset: p,
+  store,
+  notify,
+}: {
+  preset: Preset
+  store: Store
+  notify: (message: string, kind: 'error' | 'ok') => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  const lines = new Map<string, RateDefault>()
+  for (const type of ['CONTAINER', 'BREAKBULK'] as ShipmentType[]) {
+    for (const l of store.rateCards[type]) {
+      if (!lines.has(costKey(l))) lines.set(costKey(l), l)
+    }
+  }
+
+  // A line the card retired starts off; everything else starts on. The preset
+  // records only where it differs, in either direction.
+  const isOff = (l: RateDefault) => {
+    const key = costKey(l)
+    if (p.enabledCosts.includes(key)) return false
+    if (p.disabledCosts.includes(key)) return true
+    return !l.active
+  }
+
+  async function toggle(l: RateDefault) {
+    const key = costKey(l)
+    const turnOn = isOff(l)
+    const without = (xs: string[]) => xs.filter((k) => k !== key)
+    try {
+      await store.savePreset({
+        ...p,
+        disabledCosts: turnOn ? without(p.disabledCosts) : [...without(p.disabledCosts), key],
+        enabledCosts: turnOn ? [...without(p.enabledCosts), key] : without(p.enabledCosts),
+      })
+    } catch (e) {
+      notify(errorMessage(e), 'error')
+    }
+  }
+
+  return (
+    <div className="flex flex-col rounded" style={{ background: 'var(--secondary)' }}>
+      <div className="flex items-center gap-2 px-2 py-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium truncate">{p.buyerName}</div>
+          <div className="text-xs truncate" style={{ color: 'var(--muted-foreground)', fontFamily: 'var(--font-jetbrains)', fontSize: 9 }}>
+            {p.destination || '—'} · {p.currency} {fmt2(p.ratePerMt)}/MT
+          </div>
+        </div>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="text-xs shrink-0"
+          style={{ color: 'var(--primary)', fontSize: 10 }}
+          title="Choose which cost lines this preset leaves out"
+        >
+          {(() => {
+            const off = [...lines.values()].filter(isOff).length
+            return off ? `Costs (${off} off)` : 'Costs'
+          })()}
+        </button>
+        <button
+          onClick={() => void store.deletePreset(p.id)}
+          className="w-6 h-6 rounded flex items-center justify-center shrink-0"
+          style={{ color: '#e05252' }}
+          title="Remove preset"
+        >
+          <Icon name="trash" size={11} />
+        </button>
+      </div>
+      {open && (
+        <div className="px-2 pb-2 flex flex-col gap-2">
+          <p className="text-xs" style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>
+            Untick a line this lane never incurs; it prices at 0 on notes made from this preset. The rate card itself is untouched.
+          </p>
+          {COST_CATEGORIES.map((cat) => {
+            const inCat = [...lines.values()].filter((l) => l.category === cat)
+            if (!inCat.length) return null
+            return (
+              <div key={cat}>
+                <div className="tracking-widest uppercase mb-1" style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>
+                  {CATEGORY_LABEL[cat]}
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                  {inCat.map((l) => {
+                    const key = costKey(l)
+                    const off = isOff(l)
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-center gap-1.5 cursor-pointer min-w-0"
+                        style={{ fontSize: 10, textDecoration: off ? 'line-through' : 'none', color: off ? 'var(--muted-foreground)' : 'var(--foreground)' }}
+                      >
+                        <input type="checkbox" checked={!off} onChange={() => void toggle(l)} style={{ width: "auto", padding: 0, flexShrink: 0 }} />
+                        <span className="truncate">{l.label || l.code}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

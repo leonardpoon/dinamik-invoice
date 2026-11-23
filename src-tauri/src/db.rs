@@ -13,8 +13,8 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::calc::{
-    self, CargoInput, CostBasis, CostCategory, CostContext, CostLine, ShipmentType, compute_cargo,
-    compute_costs,
+    self, CargoInput, CostBasis, CostCategory, CostContext, CostLine, ShipmentType, apply_disabled,
+    compute_cargo, compute_costs,
 };
 use crate::error::{AppError, Result};
 use crate::models::*;
@@ -115,6 +115,9 @@ impl Db {
                 boxes               REAL NOT NULL DEFAULT 0,
                 ocean_vessel        TEXT NOT NULL DEFAULT '',
                 ocean_voyage        TEXT NOT NULL DEFAULT '',
+                extra_vessels       TEXT NOT NULL DEFAULT '[]',
+                disabled_costs      TEXT NOT NULL DEFAULT '[]',
+                enabled_costs       TEXT NOT NULL DEFAULT '[]',
                 UNIQUE (buyer_name, destination)
             );
 
@@ -151,6 +154,7 @@ impl Db {
 
                 ocean_vessel         TEXT NOT NULL DEFAULT '',
                 ocean_voyage         TEXT NOT NULL DEFAULT '',
+                extra_vessels        TEXT NOT NULL DEFAULT '[]',
                 destination          TEXT NOT NULL DEFAULT '',
                 bl_date              TEXT NOT NULL DEFAULT '',
 
@@ -186,7 +190,9 @@ impl Db {
                 basis         TEXT NOT NULL,
                 rate          REAL NOT NULL DEFAULT 0,
                 amount        REAL NOT NULL DEFAULT 0,
-                sort_order    INTEGER NOT NULL DEFAULT 0
+                sort_order    INTEGER NOT NULL DEFAULT 0,
+                disabled      INTEGER NOT NULL DEFAULT 0,
+                retired       INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_cost_note ON debit_note_cost(debit_note_id);
 
@@ -227,6 +233,12 @@ impl Db {
             "ALTER TABLE debit_note ADD COLUMN shipment_type TEXT NOT NULL DEFAULT 'CONTAINER'",
             "ALTER TABLE debit_note ADD COLUMN sticky_note TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE debit_note ADD COLUMN sticky_at TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE debit_note ADD COLUMN extra_vessels TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE preset ADD COLUMN extra_vessels TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE preset ADD COLUMN disabled_costs TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE debit_note_cost ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE preset ADD COLUMN enabled_costs TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE debit_note_cost ADD COLUMN retired INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = self.conn.execute(stmt, []);
         }
@@ -587,7 +599,6 @@ impl Db {
         Ok(self
             .rate_card(shipment_type)?
             .into_iter()
-            .filter(|r| r.active)
             .map(|r| CostLine {
                 category: r.category,
                 code: r.code,
@@ -596,6 +607,8 @@ impl Db {
                 rate: r.rate,
                 amount: 0.0,
                 sort_order: r.sort_order,
+                disabled: !r.active,
+                retired: !r.active,
             })
             .collect())
     }
@@ -607,7 +620,7 @@ impl Db {
             "SELECT id, customer_id, buyer_name, destination, si_number, product_desc,
                     packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container,
                     contract_no, boxes, ocean_vessel, ocean_voyage, feeder_vessel, feeder_voyage,
-                    p_descriptor
+                    p_descriptor, extra_vessels, disabled_costs, enabled_costs
              FROM preset ORDER BY buyer_name, destination",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -630,6 +643,11 @@ impl Db {
                 feeder_vessel: r.get("feeder_vessel")?,
                 feeder_voyage: r.get("feeder_voyage")?,
                 p_descriptor: r.get("p_descriptor")?,
+                extra_vessels: legs_from_json(&r.get::<_, String>("extra_vessels")?),
+                disabled_costs: serde_json::from_str(&r.get::<_, String>("disabled_costs")?)
+                    .unwrap_or_default(),
+                enabled_costs: serde_json::from_str(&r.get::<_, String>("enabled_costs")?)
+                    .unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -643,8 +661,8 @@ impl Db {
             "INSERT INTO preset (customer_id, buyer_name, destination, si_number, product_desc,
                  packing_desc, currency, rate_per_mt, boxes_per_container, mt_per_container, contract_no,
                  boxes, ocean_vessel, ocean_voyage, feeder_vessel, feeder_voyage,
-                 p_descriptor)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                 p_descriptor, extra_vessels, disabled_costs, enabled_costs)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
              ON CONFLICT(buyer_name, destination) DO UPDATE SET
                  customer_id = excluded.customer_id,
                  si_number = excluded.si_number,
@@ -660,7 +678,10 @@ impl Db {
                  ocean_voyage = excluded.ocean_voyage,
                  feeder_vessel = excluded.feeder_vessel,
                  feeder_voyage = excluded.feeder_voyage,
-                 p_descriptor = excluded.p_descriptor",
+                 p_descriptor = excluded.p_descriptor,
+                 extra_vessels = excluded.extra_vessels,
+                 disabled_costs = excluded.disabled_costs,
+                 enabled_costs = excluded.enabled_costs",
             params![
                 p.customer_id,
                 p.buyer_name.trim(),
@@ -679,6 +700,14 @@ impl Db {
                 p.feeder_vessel,
                 p.feeder_voyage,
                 p.p_descriptor,
+                legs_to_json(
+                    &p.extra_vessels
+                        .iter()
+                        .map(|l| VesselLeg { bl_date: String::new(), ..l.clone() })
+                        .collect::<Vec<_>>(),
+                ),
+                serde_json::to_string(&p.disabled_costs).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(&p.enabled_costs).unwrap_or_else(|_| "[]".into()),
             ],
         )?;
         Ok(())
@@ -736,9 +765,18 @@ impl Db {
         let row = self
             .conn
             .query_row(
-                "SELECT bl_date, destination FROM debit_note
-                 WHERE lower(trim(ocean_vessel)) = lower(?1) AND lower(trim(ocean_voyage)) = lower(?2)
-                   AND bl_date <> '' AND id <> ?3
+                "SELECT bl_date, destination FROM (
+                     SELECT id, bl_date, destination FROM debit_note
+                     WHERE lower(trim(ocean_vessel)) = lower(?1) AND lower(trim(ocean_voyage)) = lower(?2)
+                     UNION ALL
+                     -- A later sailing carries its own B/L date, falling back to the first's.
+                     SELECT n.id,
+                            COALESCE(NULLIF(trim(json_extract(j.value, '$.blDate')), ''), n.bl_date),
+                            n.destination
+                     FROM debit_note n, json_each(n.extra_vessels) j
+                     WHERE lower(trim(json_extract(j.value, '$.vessel'))) = lower(?1)
+                       AND lower(trim(json_extract(j.value, '$.voyage'))) = lower(?2)
+                 ) WHERE bl_date <> '' AND id <> ?3
                  ORDER BY id DESC LIMIT 1",
                 params![vessel, voyage, exclude_id.unwrap_or(-1)],
                 |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
@@ -803,13 +841,13 @@ impl Db {
                 boxes, packing_desc, boxes_per_container, mt_per_container, containers, tonnage,
                 product_desc, shipment_type, feeder_vessel, feeder_voyage, feeder_arrival_date, bl_number,
                 p_number, p_descriptor,
-                ocean_vessel, ocean_voyage, destination, bl_date,
+                ocean_vessel, ocean_voyage, extra_vessels, destination, bl_date,
                 charge_desc, currency, rate_per_mt, charge_amount, total_amount, amount_in_words,
                 cost_port, cost_transport, cost_misc, total_cost, profit,
                 remarks, created_at, updated_at)
              VALUES (?, ?, ?, ?, 'issued', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 dn_number,
                 input.year_month,
@@ -836,6 +874,7 @@ impl Db {
                 input.p_descriptor,
                 input.ocean_vessel,
                 input.ocean_voyage,
+                legs_to_json(&input.extra_vessels),
                 input.destination,
                 input.bl_date,
                 effective_charge_desc(input),
@@ -901,7 +940,7 @@ impl Db {
                 shipment_type = ?,
                 feeder_vessel = ?, feeder_voyage = ?, feeder_arrival_date = ?,
                 bl_number = ?, p_number = ?, p_descriptor = ?, ocean_vessel = ?, ocean_voyage = ?,
-                destination = ?, bl_date = ?, charge_desc = ?, currency = ?,
+                extra_vessels = ?, destination = ?, bl_date = ?, charge_desc = ?, currency = ?,
                 rate_per_mt = ?, charge_amount = ?, total_amount = ?, amount_in_words = ?,
                 cost_port = ?, cost_transport = ?, cost_misc = ?, total_cost = ?,
                 profit = ?, remarks = ?, updated_at = ?
@@ -932,6 +971,7 @@ impl Db {
                 input.p_descriptor,
                 input.ocean_vessel,
                 input.ocean_voyage,
+                legs_to_json(&input.extra_vessels),
                 input.destination,
                 input.bl_date,
                 effective_charge_desc(input),
@@ -1012,7 +1052,7 @@ impl Db {
 
     fn costs_for(&self, note_id: i64) -> Result<Vec<CostLine>> {
         let mut stmt = self.conn.prepare(
-            "SELECT category, code, label, basis, rate, amount, sort_order
+            "SELECT category, code, label, basis, rate, amount, sort_order, disabled, retired
              FROM debit_note_cost WHERE debit_note_id = ?1
              ORDER BY CASE category WHEN 'PORT' THEN 0 WHEN 'TRANSPORT' THEN 1 ELSE 2 END,
                       sort_order, code",
@@ -1027,6 +1067,8 @@ impl Db {
                 rate: r.get("rate")?,
                 amount: r.get("amount")?,
                 sort_order: r.get("sort_order")?,
+                disabled: r.get::<_, i64>("disabled")? != 0,
+                retired: r.get::<_, i64>("retired")? != 0,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -1230,8 +1272,10 @@ fn derive(input: &DebitNoteInput, costs: &[CostLine]) -> Derived {
         boxes: input.boxes,
         tonnage: cargo.tonnage,
     };
+    let mut lines = costs.to_vec();
+    apply_disabled(&mut lines, &input.disabled_costs, &input.enabled_costs);
     Derived {
-        costs: compute_costs(costs, ctx, cargo.total_amount),
+        costs: compute_costs(&lines, ctx, cargo.total_amount),
         amount_in_words: amount_to_words(cargo.total_amount),
         cargo,
     }
@@ -1281,12 +1325,33 @@ fn effective_currency(input: &DebitNoteInput) -> String {
     }
 }
 
+/// Further outward sailings are kept as a JSON array on the row: at most a
+/// handful per note, always read and written with it, never queried by column
+/// (the outward-match lookup uses `json_each`). Blank legs are dropped.
+fn legs_to_json(legs: &[VesselLeg]) -> String {
+    let kept: Vec<VesselLeg> = legs
+        .iter()
+        .map(|l| VesselLeg {
+            vessel: l.vessel.trim().to_string(),
+            voyage: l.voyage.trim().to_string(),
+            bl_date: l.bl_date.trim().to_string(),
+        })
+        .filter(|l| !l.vessel.is_empty() || !l.voyage.is_empty())
+        .take(MAX_EXTRA_VESSELS)
+        .collect();
+    serde_json::to_string(&kept).unwrap_or_else(|_| "[]".into())
+}
+
+fn legs_from_json(s: &str) -> Vec<VesselLeg> {
+    serde_json::from_str(s).unwrap_or_default()
+}
+
 fn insert_costs(tx: &rusqlite::Transaction<'_>, note_id: i64, lines: &[CostLine]) -> Result<()> {
     for l in lines {
         tx.execute(
             "INSERT INTO debit_note_cost
-                 (debit_note_id, category, code, label, basis, rate, amount, sort_order)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (debit_note_id, category, code, label, basis, rate, amount, sort_order, disabled, retired)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 note_id,
                 l.category.as_str(),
@@ -1295,7 +1360,9 @@ fn insert_costs(tx: &rusqlite::Transaction<'_>, note_id: i64, lines: &[CostLine]
                 l.basis.as_str(),
                 l.rate,
                 l.amount,
-                l.sort_order
+                l.sort_order,
+                l.disabled,
+                l.retired
             ],
         )?;
     }
@@ -1388,6 +1455,7 @@ fn row_to_note(r: &Row<'_>) -> rusqlite::Result<DebitNote> {
         p_descriptor: r.get("p_descriptor")?,
         ocean_vessel: r.get("ocean_vessel")?,
         ocean_voyage: r.get("ocean_voyage")?,
+        extra_vessels: legs_from_json(&r.get::<_, String>("extra_vessels")?),
         destination: r.get("destination")?,
         bl_date: r.get("bl_date")?,
         charge_desc: r.get("charge_desc")?,
@@ -1440,12 +1508,15 @@ mod tests {
             p_descriptor: "Riverside Estate".into(),
             ocean_vessel: "Pacific Voyager".into(),
             ocean_voyage: "12E".into(),
+            extra_vessels: Vec::new(),
             destination: "Savannah, USA".into(),
             bl_date: "2026-09-29".into(),
             charge_desc: "Transhipment Charge".into(),
             currency: "SGD".into(),
             rate_per_mt: 54.0,
             costs: None,
+            disabled_costs: Vec::new(),
+            enabled_costs: Vec::new(),
             remarks: String::new(),
         }
     }
@@ -1706,6 +1777,13 @@ mod tests {
             feeder_vessel: "Coral Star".into(),
             feeder_voyage: "2609W".into(),
             p_descriptor: "Riverside Estate".into(),
+            extra_vessels: vec![VesselLeg {
+                vessel: "Atlantic Dawn".into(),
+                voyage: "07W".into(),
+                bl_date: "2026-10-05".into(),
+            }],
+            disabled_costs: vec!["PORT:SR".into()],
+            enabled_costs: vec!["PORT:HSC".into()],
         })
         .unwrap();
 
@@ -1717,6 +1795,83 @@ mod tests {
         assert_eq!(presets[0].feeder_vessel, "Coral Star");
         assert_eq!(presets[0].feeder_voyage, "2609W");
         assert_eq!(presets[0].p_descriptor, "Riverside Estate");
+        assert_eq!(presets[0].extra_vessels.len(), 1);
+        assert_eq!(presets[0].extra_vessels[0].vessel, "Atlantic Dawn");
+        assert_eq!(presets[0].extra_vessels[0].bl_date, "", "a B/L date is per shipment, never templated");
+        assert_eq!(presets[0].disabled_costs, vec!["PORT:SR".to_string()]);
+        assert_eq!(presets[0].enabled_costs, vec!["PORT:HSC".to_string()]);
+    }
+
+    #[test]
+    fn a_split_shipment_keeps_its_extra_vessels_and_matches_on_any_of_them() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        let mut input = sample_input(cid);
+        input.extra_vessels = vec![
+            VesselLeg { vessel: " Atlantic Dawn ".into(), voyage: "07W".into(), bl_date: "2026-10-06".into() },
+            VesselLeg::default(),
+        ];
+        let id = db.create_debit_note(&input).unwrap();
+
+        let note = db.debit_note(id).unwrap();
+        assert_eq!(note.extra_vessels.len(), 1, "blank legs are dropped");
+        assert_eq!(note.extra_vessels[0].vessel, "Atlantic Dawn");
+
+        let first = db.outward_match("Pacific Voyager", "12E", None).unwrap();
+        let second = db.outward_match("atlantic dawn", "07w", None).unwrap();
+        assert_eq!(first.unwrap().bl_date, "2026-09-29");
+        let second = second.unwrap();
+        assert_eq!(second.destination, "Savannah, USA");
+        assert_eq!(second.bl_date, "2026-10-06", "a later sailing offers back its own B/L date");
+        assert!(db.outward_match("Atlantic Dawn", "99X", None).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_retired_line_is_off_by_default_but_can_be_switched_on_per_note() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        let mut card = db.rate_card(ShipmentType::Container).unwrap();
+        card.iter_mut().find(|l| l.code == "SR").unwrap().active = false;
+        db.save_rate_card(ShipmentType::Container, &card).unwrap();
+
+        let id = db.create_debit_note(&sample_input(cid)).unwrap();
+        let note = db.debit_note(id).unwrap();
+        let sr = note.costs.iter().find(|c| c.code == "SR").expect("retired line is kept on the note");
+        assert!(sr.retired && sr.disabled);
+        assert_eq!(sr.amount, 0.0);
+
+        let mut input = sample_input(cid);
+        input.dn_number = "DN202609-91".into();
+        input.enabled_costs = vec!["PORT:SR".into()];
+        let id = db.create_debit_note(&input).unwrap();
+        let on = db.debit_note(id).unwrap();
+        let sr = on.costs.iter().find(|c| c.code == "SR").unwrap();
+        assert!(!sr.disabled);
+        assert!(sr.amount > 0.0);
+        assert!(on.total_cost > note.total_cost);
+    }
+
+    #[test]
+    fn disabled_cost_lines_price_at_zero_and_stay_disabled() {
+        let mut db = Db::open_in_memory().unwrap();
+        let cid = db.customers().unwrap()[0].id;
+        let base = db.create_debit_note(&sample_input(cid)).unwrap();
+        let full = db.debit_note(base).unwrap();
+        let sr = full.costs.iter().find(|c| c.code == "SR").expect("SR on the card");
+        assert!(sr.amount > 0.0);
+
+        let mut input = sample_input(cid);
+        input.dn_number = "DN202609-90".into();
+        input.disabled_costs = vec!["PORT:SR".into()];
+        let id = db.create_debit_note(&input).unwrap();
+        let note = db.debit_note(id).unwrap();
+        let sr = note.costs.iter().find(|c| c.code == "SR").unwrap();
+        assert!(sr.disabled);
+        assert_eq!(sr.amount, 0.0);
+        assert!(note.total_cost < full.total_cost);
+        assert!((note.profit - (note.total_amount - note.total_cost)).abs() < 0.005);
+        // A disabled line is still listed — it prints as 0.00, not hidden.
+        assert_eq!(note.costs.len(), full.costs.len());
     }
 
     #[test]

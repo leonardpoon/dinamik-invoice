@@ -78,7 +78,25 @@ export interface CostLine {
   rate: number
   amount: number
   sortOrder: number
+  /** Switched off for this shipment — prices at zero but stays listed. */
+  disabled?: boolean
+  /** Retired in the Rates card: offered off by default, never printed unless switched on. */
+  retired?: boolean
 }
+
+/** How a template or note names a cost line it has switched off. */
+export const costKey = (l: { category: string; code: string }) => `${l.category}:${l.code}`
+
+/** A further outward vessel + voyage on a shipment split across sailings. */
+export interface VesselLeg {
+  vessel: string
+  voyage: string
+  /** This sailing's own B/L date; blank means the same as the first's. */
+  blDate?: string
+}
+
+/** Outward vessels a note can carry besides the first — five in all. */
+export const MAX_EXTRA_VESSELS = 4
 
 export interface Preset {
   id: number
@@ -99,6 +117,11 @@ export interface Preset {
   feederVessel: string
   feederVoyage: string
   pDescriptor: string
+  extraVessels: VesselLeg[]
+  /** Cost lines (`CATEGORY:code`) this lane never incurs. */
+  disabledCosts: string[]
+  /** Retired lines this lane switches back on. */
+  enabledCosts: string[]
 }
 
 /** A saved cover letter, with the DN numbers it enclosed. */
@@ -151,16 +174,21 @@ export interface DebitNoteInput {
   pDescriptor: string
   oceanVessel: string
   oceanVoyage: string
+  extraVessels: VesselLeg[]
   destination: string
   blDate: string
   chargeDesc: string
   currency: string
   ratePerMt: number
   costs?: CostLine[] | null
+  /** Lines switched off, whether `costs` is the card or an edited copy. */
+  disabledCosts: string[]
+  /** Lines the Rates card retired that this note switches back on. */
+  enabledCosts: string[]
   remarks: string
 }
 
-export interface DebitNote extends Omit<DebitNoteInput, 'costs'> {
+export interface DebitNote extends Omit<DebitNoteInput, 'costs' | 'disabledCosts' | 'enabledCosts'> {
   id: number
   runningNo: number
   status: NoteStatus

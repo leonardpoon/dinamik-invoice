@@ -63,6 +63,8 @@ export const api = {
     shipmentType: ShipmentType
     /** Omit to price with the current rate card; pass lines to override it. */
     costs?: CostLine[]
+    disabledCosts?: string[]
+    enabledCosts?: string[]
   }) => invoke<Preview>('preview_figures', { input }),
 
   analytics: (yearMonth?: string) => invoke<Analytics>('analytics', { yearMonth: yearMonth ?? null }),

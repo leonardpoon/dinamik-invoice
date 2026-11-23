@@ -201,6 +201,35 @@ pub struct CostLine {
     #[serde(default)]
     pub amount: f64,
     pub sort_order: i64,
+    /// Switched off for this shipment (e.g. a buyer with no seal or B/L fee):
+    /// the line stays on the card but prices at zero.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Retired in the global rate card. Such a line is still offered on a
+    /// note, off by default, so it can be switched back on for one shipment;
+    /// while it stays off it is not printed.
+    #[serde(default)]
+    pub retired: bool,
+}
+
+/// How a template or note names a cost line it has switched off.
+pub fn cost_key(category: CostCategory, code: &str) -> String {
+    format!("{}:{}", category.as_str(), code)
+}
+
+/// Applies a note's or template's choices on top of each line's starting
+/// state (off if the card retired it, otherwise on): a key in `enabled` turns
+/// the line on, one in `disabled` turns it off, and anything else is left as
+/// it was.
+pub fn apply_disabled(lines: &mut [CostLine], disabled: &[String], enabled: &[String]) {
+    for l in lines {
+        let key = cost_key(l.category, &l.code);
+        if enabled.iter().any(|k| *k == key) {
+            l.disabled = false;
+        } else if disabled.iter().any(|k| *k == key) {
+            l.disabled = true;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -236,7 +265,10 @@ pub struct CostSummary {
 pub fn compute_costs(lines: &[CostLine], ctx: CostContext, revenue: f64) -> CostSummary {
     let priced: Vec<CostLine> = lines
         .iter()
-        .map(|l| CostLine { amount: compute_cost_amount(l.basis, l.rate, ctx), ..l.clone() })
+        .map(|l| CostLine {
+            amount: if l.disabled { 0.0 } else { compute_cost_amount(l.basis, l.rate, ctx) },
+            ..l.clone()
+        })
         .collect();
 
     let sum = |cat: CostCategory| -> f64 {
@@ -268,6 +300,8 @@ pub fn default_rate_card() -> Vec<CostLine> {
         rate,
         amount: 0.0,
         sort_order,
+        disabled: false,
+        retired: false,
     };
     use CostBasis::*;
     use CostCategory::*;

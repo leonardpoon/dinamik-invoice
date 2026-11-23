@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::calc::{
-    self, CargoInput, CostContext, CostLine, CostSummary, ShipmentType, compute_cargo, compute_costs,
+    self, CargoInput, CostContext, CostLine, CostSummary, ShipmentType, apply_disabled, compute_cargo, compute_costs,
 };
 use crate::db::Db;
 use crate::error::{AppError, Result};
@@ -207,6 +207,10 @@ pub struct PreviewInput {
     pub shipment_type: ShipmentType,
     #[serde(default)]
     pub costs: Option<Vec<CostLine>>,
+    #[serde(default)]
+    pub disabled_costs: Vec<String>,
+    #[serde(default)]
+    pub enabled_costs: Vec<String>,
 }
 
 #[tauri::command]
@@ -217,13 +221,12 @@ pub fn preview_figures(state: State<'_, AppState>, input: PreviewInput) -> Resul
         mt_per_container: input.mt_per_container,
         rate_per_mt: input.rate_per_mt,
     });
-    let lines = match input.costs {
+    let mut lines = match input.costs {
         Some(c) => c,
         None => state
             .db()
             .rate_card(input.shipment_type)?
             .into_iter()
-            .filter(|r| r.active)
             .map(|r| CostLine {
                 category: r.category,
                 code: r.code,
@@ -232,9 +235,12 @@ pub fn preview_figures(state: State<'_, AppState>, input: PreviewInput) -> Resul
                 rate: r.rate,
                 amount: 0.0,
                 sort_order: r.sort_order,
+                disabled: !r.active,
+                retired: !r.active,
             })
             .collect(),
     };
+    apply_disabled(&mut lines, &input.disabled_costs, &input.enabled_costs);
     let ctx = CostContext {
         containers: cargo.containers,
         boxes: input.boxes,

@@ -8,6 +8,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::calc::{CostBasis, CostCategory, CostLine, ShipmentType};
 
+/// One further outward vessel + voyage on a note whose shipment was split
+/// across sailings. The first sailing stays in `ocean_vessel`/`ocean_voyage`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VesselLeg {
+    #[serde(default)]
+    pub vessel: String,
+    #[serde(default)]
+    pub voyage: String,
+    /// This sailing's own B/L date; empty means the same as the first sailing's.
+    #[serde(default)]
+    pub bl_date: String,
+}
+
+/// The most further sailings a note takes, so five outward vessels in all.
+pub const MAX_EXTRA_VESSELS: usize = 4;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -173,6 +190,14 @@ pub struct Preset {
     /// The factory code (`DebitNote::p_descriptor`), which follows the buyer.
     #[serde(default)]
     pub p_descriptor: String,
+    #[serde(default)]
+    pub extra_vessels: Vec<VesselLeg>,
+    /// Cost lines (`CATEGORY:code`) this lane never incurs; they price at zero.
+    #[serde(default)]
+    pub disabled_costs: Vec<String>,
+    /// Lines the global card retired that this lane switches back on.
+    #[serde(default)]
+    pub enabled_costs: Vec<String>,
 }
 
 /// A prior note's feeder call, offered back when a new note names the same
@@ -359,6 +384,8 @@ pub struct DebitNoteInput {
     #[serde(default)]
     pub ocean_voyage: String,
     #[serde(default)]
+    pub extra_vessels: Vec<VesselLeg>,
+    #[serde(default)]
     pub destination: String,
     #[serde(default)]
     pub bl_date: String,
@@ -372,6 +399,13 @@ pub struct DebitNoteInput {
     /// Omitted on create, in which case the current rate card is copied in.
     #[serde(default)]
     pub costs: Option<Vec<CostLine>>,
+    /// Lines switched off for this note, whether `costs` is the card or an
+    /// edited copy of it.
+    #[serde(default)]
+    pub disabled_costs: Vec<String>,
+    /// Lines the global card retired that this lane switches back on.
+    #[serde(default)]
+    pub enabled_costs: Vec<String>,
 
     #[serde(default)]
     pub remarks: String,
@@ -413,6 +447,7 @@ pub struct DebitNote {
 
     pub ocean_vessel: String,
     pub ocean_voyage: String,
+    pub extra_vessels: Vec<VesselLeg>,
     pub destination: String,
     pub bl_date: String,
 

@@ -35,12 +35,15 @@ fn main() {
         p_descriptor: "Riverside Estate".into(),
         ocean_vessel: "Pacific Voyager".into(),
         ocean_voyage: "12E".into(),
+        extra_vessels: Vec::new(),
         destination: "Savannah, USA".into(),
         bl_date: "2026-09-29".into(),
         charge_desc: "Transhipment Charge".into(),
         currency: "SGD".into(),
         rate_per_mt: 54.0,
         costs: None,
+        disabled_costs: Vec::new(),
+        enabled_costs: Vec::new(),
         remarks: String::new(),
     };
     let id = db.create_debit_note(&input).unwrap();

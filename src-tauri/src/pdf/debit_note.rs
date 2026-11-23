@@ -219,21 +219,47 @@ fn draw_copy(p: &mut Page, note: &DebitNote, s: &Settings, copy: Copy) {
         }
         y += CARRIAGE_ROW_H;
     }
-    if !note.ocean_vessel.trim().is_empty() {
-        let voy = if note.ocean_voyage.trim().is_empty() {
-            String::new()
-        } else {
-            format!(" Voy {}", note.ocean_voyage.trim())
-        };
-        p.text(L, y, &format!("Shipped per {}{}", note.ocean_vessel.trim(), voy), BODY, FS, BLACK);
+    // A shipment split across sailings repeats the same line once per vessel,
+    // each with its own B/L date beside it (a vessel with no date of its own
+    // shares the first's). A single sailing keeps the B/L date on its own line
+    // below, as before.
+    let first_date = note.bl_date.trim();
+    let split = note.extra_vessels.iter().any(|l| !l.vessel.trim().is_empty());
+    let sailings = std::iter::once((note.ocean_vessel.as_str(), note.ocean_voyage.as_str(), first_date))
+        .chain(note.extra_vessels.iter().map(|l| {
+            let d = l.bl_date.trim();
+            (l.vessel.as_str(), l.voyage.as_str(), if d.is_empty() { first_date } else { d })
+        }))
+        .filter(|(vessel, _, _)| !vessel.trim().is_empty());
+    let lines: Vec<(String, &str)> = sailings
+        .map(|(vessel, voyage, date)| {
+            let voy = if voyage.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" Voy {}", voyage.trim())
+            };
+            (format!("Shipped per {}{}", vessel.trim(), voy), date)
+        })
+        .collect();
+    // Dates line up in one column, two tabs past the longest vessel line.
+    let date_x = L + lines
+        .iter()
+        .map(|(text, _)| writer::text_width(text, BODY, FS))
+        .fold(0.0, f64::max)
+        + 2.0 * TAB_GAP;
+    for (text, date) in &lines {
+        p.text(L, y, text, BODY, FS, BLACK);
+        if split && !date.is_empty() {
+            p.text(date_x, y, &format!("B/L dated {}", long_date(date)), BODY, FS, BLACK);
+        }
         y += CARRIAGE_ROW_H;
     }
     if !note.destination.trim().is_empty() {
         p.text(L, y, &format!("To {}", note.destination.trim()), BODY, FS, BLACK);
         y += CARRIAGE_ROW_H;
     }
-    if !note.bl_date.trim().is_empty() {
-        p.text(L, y, &format!("B/L dated {}", long_date(&note.bl_date)), BODY, FS, BLACK);
+    if !split && !first_date.is_empty() {
+        p.text(L, y, &format!("B/L dated {}", long_date(first_date)), BODY, FS, BLACK);
         y += CARRIAGE_ROW_H;
     }
 
@@ -336,7 +362,8 @@ fn draw_costing(p: &mut Page, note: &DebitNote) {
     for (i, cat) in CostCategory::ALL.iter().enumerate() {
         let x = L + i as f64 * col_w;
         let mut y = Y_COSTING_FIRST;
-        for line in note.costs.iter().filter(|c| c.category == *cat) {
+        // A line the card retired and nobody switched back on is not printed.
+        for line in note.costs.iter().filter(|c| c.category == *cat && !(c.disabled && c.retired)) {
             p.text_clipped(x, y, &code_of(line), Font::Courier, 6.5, BLACK, 15.0);
             p.text_aligned(
                 x + col_w - 6.0,

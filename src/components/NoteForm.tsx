@@ -11,8 +11,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { api, errorMessage } from '../api'
 import type { Store } from '../store'
-import type { CostLine, DebitNote, DebitNoteInput, Preset, Preview, ShipmentType } from '../types'
-import { CATEGORY_LABEL, COST_CATEGORIES } from '../types'
+import type { CostLine, DebitNote, DebitNoteInput, Preset, Preview, ShipmentType, VesselLeg } from '../types'
+import { CATEGORY_LABEL, COST_CATEGORIES, MAX_EXTRA_VESSELS, costKey } from '../types'
 import {
   Chevron,
   Derived,
@@ -56,6 +56,7 @@ const PRESET_FIELDS = [
   'boxes',
   'oceanVessel',
   'oceanVoyage',
+  'extraVessels',
   'feederVessel',
   'feederVoyage',
   'pDescriptor',
@@ -103,11 +104,14 @@ function emptyInput(): DebitNoteInput {
     pDescriptor: '',
     oceanVessel: '',
     oceanVoyage: '',
+    extraVessels: [],
     destination: '',
     blDate: '',
     chargeDesc: '',
     currency: 'SGD',
     ratePerMt: 0,
+    disabledCosts: [],
+    enabledCosts: [],
     remarks: '',
   }
 }
@@ -136,12 +140,15 @@ export function inputFromNote(n: DebitNote): DebitNoteInput {
     pDescriptor: n.pDescriptor,
     oceanVessel: n.oceanVessel,
     oceanVoyage: n.oceanVoyage,
+    extraVessels: n.extraVessels ?? [],
     destination: n.destination,
     blDate: n.blDate,
     chargeDesc: n.chargeDesc,
     currency: n.currency,
     ratePerMt: n.ratePerMt,
     costs: n.costs,
+    disabledCosts: n.costs.filter((c) => c.disabled).map(costKey),
+    enabledCosts: [],
     remarks: n.remarks,
   }
 }
@@ -235,7 +242,7 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
 
   // Live figures, priced by the same Rust that will store them.
   const cargoKey = useDebounced(
-    `${form.boxes}|${form.boxesPerContainer}|${form.mtPerContainer}|${form.ratePerMt}|${form.shipmentType}|${costs ? JSON.stringify(costs) : ''}`,
+    `${form.boxes}|${form.boxesPerContainer}|${form.mtPerContainer}|${form.ratePerMt}|${form.shipmentType}|${costs ? JSON.stringify(costs) : ''}|${form.disabledCosts.join(',')}|${form.enabledCosts.join(',')}`,
   )
   useEffect(() => {
     let cancelled = false
@@ -247,6 +254,8 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
         ratePerMt: form.ratePerMt,
         shipmentType: form.shipmentType,
         ...(costs ? { costs } : {}),
+        disabledCosts: form.disabledCosts,
+        enabledCosts: form.enabledCosts,
       })
       .then((p) => {
         if (!cancelled) setPreview(p)
@@ -294,24 +303,51 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
   // it to the same place on the same day, so once the outward vessel and
   // voyage match an existing note, its B/L date and destination are offered
   // back instead of being retyped. Never overwrites something already typed.
-  const outwardKey = useDebounced(`${form.oceanVessel}|${form.oceanVoyage}`)
+  // A split shipment has several sailings; the first one that matches wins.
+  const outwardLegs: VesselLeg[] = [
+    { vessel: form.oceanVessel, voyage: form.oceanVoyage },
+    ...form.extraVessels,
+  ].filter((l) => l.vessel.trim() && l.voyage.trim())
+  const outwardKey = useDebounced(outwardLegs.map((l) => `${l.vessel}|${l.voyage}`).join(';'))
   useEffect(() => {
-    if (!form.oceanVessel.trim() || !form.oceanVoyage.trim()) return
+    if (!outwardLegs.length) return
     let cancelled = false
-    api
-      .outwardMatch(form.oceanVessel, form.oceanVoyage, editing?.id)
-      .then((match) => {
-        if (cancelled || !match) return
+    const lookups = outwardLegs.map((l) => api.outwardMatch(l.vessel, l.voyage, editing?.id))
+    Promise.all(lookups)
+      .then((matches) => {
+        if (cancelled) return
         const filled: string[] = []
-        if (!form.blDate.trim()) filled.push('blDate')
-        if (!form.destination.trim()) filled.push('destination')
-        if (!filled.length) return
-        setForm((f) => ({
-          ...f,
-          ...(filled.includes('blDate') ? { blDate: match.blDate } : {}),
-          ...(filled.includes('destination') ? { destination: match.destination } : {}),
-        }))
-        setHighlighted((h) => [...new Set([...h, ...filled])])
+        setForm((f) => {
+          let next = f
+          // Each sailing offers back its own B/L date; the destination is shared.
+          outwardLegs.forEach((leg, n) => {
+            const match = matches[n]
+            if (!match) return
+            const isFirst = leg.vessel === f.oceanVessel && leg.voyage === f.oceanVoyage
+            if (isFirst) {
+              if (!next.blDate.trim()) {
+                next = { ...next, blDate: match.blDate }
+                filled.push('blDate')
+              }
+            } else {
+              const at = next.extraVessels.findIndex((x) => x.vessel === leg.vessel && x.voyage === leg.voyage)
+              if (at >= 0 && !next.extraVessels[at].blDate?.trim()) {
+                next = {
+                  ...next,
+                  extraVessels: next.extraVessels.map((x, j) => (j === at ? { ...x, blDate: match.blDate } : x)),
+                }
+                filled.push('extraVessels')
+              }
+            }
+          })
+          const hit = matches.find((m) => m)
+          if (hit && !next.destination.trim()) {
+            next = { ...next, destination: hit.destination }
+            filled.push('destination')
+          }
+          return next
+        })
+        if (filled.length) setHighlighted((h) => [...new Set([...h, ...filled])])
       })
       .catch(() => {})
     return () => {
@@ -368,6 +404,12 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
       boxes: p.boxes || f.boxes,
       oceanVessel: p.oceanVessel || f.oceanVessel,
       oceanVoyage: p.oceanVoyage || f.oceanVoyage,
+      extraVessels: p.extraVessels?.length
+        ? p.extraVessels.map((l) => ({ ...l, blDate: '' }))
+        : f.extraVessels,
+      // The template says which cost lines this lane never incurs.
+      disabledCosts: p.disabledCosts ?? [],
+      enabledCosts: p.enabledCosts ?? [],
       // The first carrier is copied the same way as the outward one; the
       // feeder-match lookup then offers back its arrival date and B/L prefix.
       feederVessel: p.feederVessel || f.feederVessel,
@@ -449,6 +491,11 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
           feederVessel: form.feederVessel,
           feederVoyage: form.feederVoyage,
           pDescriptor: form.pDescriptor,
+          extraVessels: form.extraVessels
+            .filter((l) => l.vessel.trim() || l.voyage.trim())
+            .map((l) => ({ vessel: l.vessel, voyage: l.voyage })),
+          disabledCosts: form.disabledCosts,
+          enabledCosts: form.enabledCosts,
         })
         onSaved(created.id, created.dnNumber)
       }
@@ -911,23 +958,64 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
             {/* Outward */}
             <Section title="Outward Vessel" subtitle="Onward routing and the dated B/L">
               <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-                <Field label="Vessel Name">
-                  <input
-                    value={form.oceanVessel}
-                    onChange={(e) => set('oceanVessel', e.target.value)}
-                    style={ring('oceanVessel')}
-                  />
-                </Field>
-
-                <Field label="Voyage Number">
-                  <Prefixed prefix="Voy" style={ring('oceanVoyage')}>
-                    <MonoInput
-                      value={form.oceanVoyage}
-                      onChange={(e) => set('oceanVoyage', e.target.value)}
-                      style={{ border: 'none', borderRadius: 0, background: 'transparent', flex: 1, minWidth: 0 }}
+                {/* Each sailing's B/L date sits beside its own vessel. */}
+                <div className="col-span-2 grid grid-cols-3 gap-x-6">
+                  <Field label="Vessel Name">
+                    <input
+                      value={form.oceanVessel}
+                      onChange={(e) => set('oceanVessel', e.target.value)}
+                      style={ring('oceanVessel')}
                     />
-                  </Prefixed>
-                </Field>
+                  </Field>
+
+                  <Field label="Voyage Number">
+                    <Prefixed prefix="Voy" style={ring('oceanVoyage')}>
+                      <MonoInput
+                        value={form.oceanVoyage}
+                        onChange={(e) => set('oceanVoyage', e.target.value)}
+                        style={{ border: 'none', borderRadius: 0, background: 'transparent', flex: 1, minWidth: 0 }}
+                      />
+                    </Prefixed>
+                  </Field>
+
+                  <Field label="B/L Dated">
+                    <input type="date" value={form.blDate} onChange={(e) => set('blDate', e.target.value)} style={ring('blDate')} />
+                  </Field>
+                </div>
+
+                {form.extraVessels.map((leg, i) => (
+                  <ExtraVessel
+                    key={i}
+                    index={i + 2}
+                    leg={leg}
+                    style={ring('extraVessels')}
+                    onChange={(next) =>
+                      set(
+                        'extraVessels',
+                        form.extraVessels.map((l, j) => (j === i ? next : l)),
+                      )
+                    }
+                    onRemove={() =>
+                      set(
+                        'extraVessels',
+                        form.extraVessels.filter((_, j) => j !== i),
+                      )
+                    }
+                  />
+                ))}
+
+                {form.extraVessels.length < MAX_EXTRA_VESSELS && (
+                  <div className="col-span-2 -mt-2">
+                    <button
+                      type="button"
+                      onClick={() => set('extraVessels', [...form.extraVessels, { vessel: '', voyage: '' }])}
+                      className="flex items-center gap-1.5 text-xs"
+                      style={{ color: 'var(--primary)' }}
+                    >
+                      <Icon name="plus" size={10} strokeWidth={2.5} /> Add another vessel
+                    </button>
+                  </div>
+                )}
 
                 <Field label="Destination" required error={errors.destination}>
                   <input
@@ -935,10 +1023,6 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
                     onChange={(e) => set('destination', e.target.value)}
                     style={ring('destination')}
                   />
-                </Field>
-
-                <Field label="B/L Dated">
-                  <input type="date" value={form.blDate} onChange={(e) => set('blDate', e.target.value)} style={ring('blDate')} />
                 </Field>
               </div>
             </Section>
@@ -995,6 +1079,12 @@ export default function NoteForm({ store, editing, onSaved, onCancel, notify }: 
             <CostingSection
               preview={preview}
               costs={costs}
+              disabledCosts={form.disabledCosts}
+              enabledCosts={form.enabledCosts}
+              onToggle={(disabled, enabled) => {
+                set('disabledCosts', disabled)
+                set('enabledCosts', enabled)
+              }}
               currency={currency}
               shipmentType={form.shipmentType}
               onEdit={(lines) => setCosts(lines)}
@@ -1093,10 +1183,16 @@ function CostingSection({
   costs,
   currency,
   shipmentType,
+  disabledCosts,
+  enabledCosts,
+  onToggle,
   onEdit,
   onReset,
 }: {
   preview: Preview | null
+  disabledCosts: string[]
+  enabledCosts: string[]
+  onToggle: (disabled: string[], enabled: string[]) => void
   costs: CostLine[] | null
   currency: string
   shipmentType: ShipmentType
@@ -1105,6 +1201,14 @@ function CostingSection({
 }) {
   const [open, setOpen] = useState(false)
   const lines = preview?.costs.lines ?? []
+
+  function toggle(l: CostLine) {
+    const key = costKey(l)
+    // Switching on or off records the choice explicitly, so it holds even for
+    // a line the Rates card has retired.
+    if (l.disabled) onToggle(disabledCosts.filter((k) => k !== key), [...enabledCosts.filter((k) => k !== key), key])
+    else onToggle([...disabledCosts.filter((k) => k !== key), key], enabledCosts.filter((k) => k !== key))
+  }
 
   function setRate(code: string, category: string, rate: number) {
     onEdit(lines.map((l) => (l.code === code && l.category === category ? { ...l, rate } : l)))
@@ -1149,10 +1253,24 @@ function CostingSection({
                     .filter((l) => l.category === cat)
                     .map((l) => (
                       <div key={cat + l.code} className="flex items-center justify-between gap-2" style={{ fontFamily: 'var(--font-jetbrains)', fontSize: 10 }}>
-                        <span style={{ color: 'var(--muted-foreground)' }}>{l.label || l.code}</span>
+                        <label
+                          className="flex items-center gap-1.5 cursor-pointer min-w-0"
+                          style={{ color: 'var(--muted-foreground)', textDecoration: l.disabled ? 'line-through' : 'none' }}
+                          title={
+                            l.retired && l.disabled
+                              ? 'Retired in Settings → Rates — tick to include it on this shipment'
+                              : l.disabled
+                                ? 'Off for this shipment — prices at 0'
+                                : 'Untick if this shipment has no such charge'
+                          }
+                        >
+                          <input type="checkbox" checked={!l.disabled} onChange={() => toggle(l)} style={{ width: "auto", padding: 0, flexShrink: 0 }} />
+                          <span className="truncate">{l.label || l.code}</span>
+                        </label>
                         {open ? (
                           <input
                             type="number"
+                            disabled={l.disabled}
                             step="0.01"
                             value={l.rate}
                             onChange={(e) => setRate(l.code, l.category, parseFloat(e.target.value) || 0)}
@@ -1205,6 +1323,57 @@ function CostingSection({
         </>
       )}
     </Section>
+  )
+}
+
+function ExtraVessel({
+  index,
+  leg,
+  style,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  leg: VesselLeg
+  style: React.CSSProperties
+  onChange: (leg: VesselLeg) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="col-span-2 grid grid-cols-3 gap-x-6">
+      <Field label={`Vessel Name ${index}`}>
+        <input value={leg.vessel} onChange={(e) => onChange({ ...leg, vessel: e.target.value })} style={style} />
+      </Field>
+      <Field label={`Voyage Number ${index}`}>
+        <Prefixed prefix="Voy" style={style}>
+          <MonoInput
+            value={leg.voyage}
+            onChange={(e) => onChange({ ...leg, voyage: e.target.value })}
+            style={{ border: 'none', borderRadius: 0, background: 'transparent', flex: 1, minWidth: 0 }}
+          />
+        </Prefixed>
+      </Field>
+      <Field label={`B/L Dated ${index}`}>
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={leg.blDate ?? ''}
+            onChange={(e) => onChange({ ...leg, blDate: e.target.value })}
+            style={style}
+            title="Leave blank if it matches the first vessel's B/L date"
+          />
+          <button
+            type="button"
+            onClick={onRemove}
+            className="w-7 h-7 rounded flex items-center justify-center shrink-0"
+            style={{ color: '#e05252' }}
+            title="Remove this vessel"
+          >
+            <Icon name="trash" size={12} />
+          </button>
+        </div>
+      </Field>
+    </div>
   )
 }
 
