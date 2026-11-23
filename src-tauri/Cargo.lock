@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "dinamik-invoice"
-version = "0.4.3"
+version = "0.4.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",

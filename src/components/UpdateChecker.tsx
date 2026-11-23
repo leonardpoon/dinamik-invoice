@@ -62,9 +62,15 @@ export default function UpdateChecker({
     setInstalling(true)
     try {
       await update.downloadAndInstall()
+      notify('Update installed — restarting…', 'ok')
       await relaunch()
     } catch (e) {
-      notify(e instanceof Error ? e.message : 'Could not install the update', 'error')
+      // Surface the real reason; a bare "nothing happened" is undiagnosable.
+      const reason = e instanceof Error ? e.message : typeof e === 'string' ? e : ''
+      notify(
+        `Could not install the update${reason ? `: ${reason}` : ''}. You can also download the installer from the GitHub release page.`,
+        'error',
+      )
       setInstalling(false)
     }
   }
